@@ -43,9 +43,46 @@ jobs:
       - name: Reproducible runtime artifact
         run: bash scripts/build-runtime.sh --check
       - name: Static ELF round trip
+        env:
+          PACKFORGE_CONTAINER_DIGESTS: target/container-corpus/container-digests-linux.tsv
+          PACKFORGE_CORPUS_OUTPUT: target/container-corpus/inputs
         run: bash scripts/ci-linux-smoke.sh
       - name: Self-contained executable round trip
         run: bash scripts/ci-linux-executable-smoke.sh
+      - name: Archive deterministic container corpus
+        run: tar -C target/container-corpus -cf target/container-corpus/corpus.tar inputs
+      - uses: actions/upload-artifact@v4
+        with:
+          name: packforge-container-corpus-linux
+          path: |
+            target/container-corpus/container-digests-linux.tsv
+            target/container-corpus/corpus.tar
+
+  container-reproducibility:
+    needs: rust
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: dtolnay/rust-toolchain@1.97.0
+      - uses: actions/download-artifact@v4
+        with:
+          name: packforge-container-corpus-linux
+          path: target/container-reproducibility
+      - name: Repack Linux corpus on macOS ARM64
+        run: |
+          mkdir -p target/container-reproducibility/inputs
+          tar -C target/container-reproducibility \
+            -xf target/container-reproducibility/corpus.tar
+          bash scripts/ci-container-repack.sh \
+            target/container-reproducibility/inputs \
+            target/container-reproducibility/container-digests-macos.tsv
+          cmp \
+            target/container-reproducibility/container-digests-linux.tsv \
+            target/container-reproducibility/container-digests-macos.tsv
+      - uses: actions/upload-artifact@v4
+        with:
+          name: packforge-container-reproducibility
+          path: target/container-reproducibility/container-digests-macos.tsv
 
   benchmark:
     if: github.event_name == 'workflow_dispatch'
