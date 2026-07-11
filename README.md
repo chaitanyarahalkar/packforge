@@ -57,6 +57,37 @@ against the embedded format metadata.
 every stable profile. It checks byte-for-byte deterministic output and reports raw
 median/minimum pack and full-verification durations in its JSON schema.
 
+## Packforge vs. UPX
+
+The first native Linux x86-64 benchmark was run on 2026-07-11 using a GitHub-hosted
+Ubuntu 24.04.4 runner. It compares Packforge's currently supported executable
+`fast` profile with UPX 5.2.0 `--best`. Every artifact executed successfully before
+measurement; values are medians from 21 warm runs after one warm-up.
+
+### Packed size
+
+| Fixture | Original | Packforge | Packforge/original | UPX | UPX/original |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| C | 785,304 B | 488,310 B | 62.18% | 308,912 B | 39.33% |
+| C++ | 785,304 B | 488,274 B | 62.17% | 308,908 B | 39.33% |
+| Rust | 438,400 B | 304,613 B | 69.48% | 196,196 B | 44.75% |
+| Go | 1,597,566 B | 1,015,850 B | 63.58% | 653,268 B | 40.89% |
+
+### Warm process time and peak RSS
+
+| Fixture | Original | Packforge | UPX | Packforge RSS | UPX RSS |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| C | 1.97 ms | 11.01 ms | 7.57 ms | 1,736 KiB | 1,736 KiB |
+| C++ | 2.02 ms | 11.06 ms | 7.59 ms | 1,736 KiB | 1,736 KiB |
+| Rust | 1.86 ms | 7.18 ms | 5.73 ms | 1,736 KiB | 1,736 KiB |
+| Go | 2.95 ms | 21.69 ms | 12.88 ms | 3,752 KiB | 3,768 KiB |
+
+On this small corpus, Packforge reduces every original but trails UPX in packed
+size and warm startup. These are warm-start microbenchmarks from one hosted runner,
+not cold-start or universal performance claims. See the
+[complete method](docs/BENCHMARKING.md) and the
+[source CI run](https://github.com/chaitanyarahalkar/packforge/actions/runs/29171498154).
+
 ## Project boundaries
 
 The first production target is a reversible ELF packer for trusted, first-party
