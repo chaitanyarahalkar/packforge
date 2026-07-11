@@ -16,6 +16,7 @@ file "$original"
 readelf -h -l "$original"
 
 cargo build --release --locked -p packforge-cli
+"$packer" benchmark "$original" --iterations 3 --json
 "$packer" pack "$original" --output "$container" --profile auto --json
 "$packer" inspect "$container" --json
 "$packer" verify "$container" --json

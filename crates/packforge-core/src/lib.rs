@@ -1,5 +1,6 @@
 //! Safe host-side operations for Packforge containers.
 
+mod benchmark;
 mod container;
 mod format;
 
@@ -8,6 +9,7 @@ use std::fs;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 
+pub use benchmark::{BenchmarkReport, MAX_BENCHMARK_ITERATIONS, ProfileBenchmark, benchmark};
 pub use container::{
     ArtifactInfo, CONTAINER_VERSION, Codec, ContainerError, MAX_CONTAINER_SIZE, MAX_ORIGINAL_SIZE,
     PackOptions, PackedArtifact, Profile, UnpackedArtifact, Verification, inspect, pack, unpack,
@@ -158,6 +160,17 @@ pub fn unpack_file(input_path: &Path, output_path: &Path) -> Result<ArtifactInfo
     };
     write_new(output_path, &artifact.bytes, mode)?;
     Ok(artifact.info)
+}
+
+/// Benchmarks every stable profile without creating an output file.
+///
+/// # Errors
+///
+/// Returns [`Error`] when input I/O, executable validation, compression,
+/// verification, determinism, or iteration-limit checks fail.
+pub fn benchmark_file(input_path: &Path, iterations: u32) -> Result<BenchmarkReport, Error> {
+    let (input, metadata) = read_bounded(input_path, MAX_ORIGINAL_SIZE)?;
+    benchmark(&input, file_mode(&metadata), iterations).map_err(Error::from)
 }
 
 fn read_bounded(path: &Path, maximum: u64) -> Result<(Vec<u8>, fs::Metadata), Error> {

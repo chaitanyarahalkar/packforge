@@ -264,6 +264,15 @@ pub enum ContainerError {
         /// Proposed container length.
         container: u64,
     },
+    /// A benchmark iteration count is outside the bounded range.
+    InvalidIterations {
+        /// Requested iteration count.
+        actual: u32,
+        /// Maximum permitted count.
+        maximum: u32,
+    },
+    /// Repeated packing produced different bytes for the same inputs.
+    NonDeterministic(Profile),
 }
 
 impl fmt::Display for ContainerError {
@@ -330,6 +339,15 @@ impl fmt::Display for ContainerError {
             } => write!(
                 formatter,
                 "packing would grow the file from {original} to {container} bytes; pass --allow-larger to keep it"
+            ),
+            Self::InvalidIterations { actual, maximum } => write!(
+                formatter,
+                "benchmark iterations must be between 1 and {maximum}; got {actual}"
+            ),
+            Self::NonDeterministic(profile) => write!(
+                formatter,
+                "{} profile produced non-deterministic container bytes",
+                profile.as_str()
             ),
         }
     }

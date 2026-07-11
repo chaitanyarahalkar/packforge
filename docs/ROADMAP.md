@@ -5,8 +5,10 @@ when its fixtures, negative tests, benchmarks, and documentation pass.
 
 ## M0 — Measurement and format contract
 
-**Status: in progress.** The container/report schema and deterministic codec
-selection exist; the reference corpus and UPX benchmark baseline remain.
+**Status: in progress.** The container/report schema, deterministic codec selection,
+and bounded per-profile benchmark command exist. The C static-ELF fixture is the
+first versioned corpus entry; broader Rust/Go/C++ coverage and the pinned UPX
+baseline remain.
 
 - Pin the reference UPX version and benchmark environment.
 - Build a legal redistributable corpus across Rust, Go, C, and C++.

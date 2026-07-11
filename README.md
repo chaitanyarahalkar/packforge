@@ -34,6 +34,7 @@ packforge pack [--profile fast|balanced|small|auto] <input> [-o <output>]
 packforge unpack <input> [-o <output>]
 packforge inspect [--json] <input>
 packforge verify [--json] <input>
+packforge benchmark [--iterations 5] [--json] <input>
 ```
 
 M1 accepts static, non-PIE, little-endian ELF64 x86-64 executables. It validates
@@ -44,6 +45,10 @@ silently claiming dynamic executables are supported.
 compressed payload without decompressing. `verify` and `unpack` additionally
 reconstruct the executable, validate its length and digest, and reclassify it
 against the embedded format metadata.
+
+`benchmark` performs one warm-up and a bounded number of measured iterations for
+every stable profile. It checks byte-for-byte deterministic output and reports raw
+median/minimum pack and full-verification durations in its JSON schema.
 
 ## Project boundaries
 

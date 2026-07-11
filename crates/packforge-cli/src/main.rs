@@ -62,6 +62,17 @@ enum Command {
         #[arg(long)]
         json: bool,
     },
+    /// Measure every stable profile and verify deterministic output.
+    Benchmark {
+        /// Static ELF x86-64 executable to benchmark.
+        input: PathBuf,
+        /// Measured iterations per profile, after one warm-up.
+        #[arg(long, default_value_t = 5)]
+        iterations: u32,
+        /// Emit the report as JSON.
+        #[arg(long)]
+        json: bool,
+    },
 }
 
 #[derive(Debug, Clone, Copy, ValueEnum)]
@@ -159,15 +170,58 @@ fn run(cli: Cli) -> Result<(), String> {
             }
             Ok(())
         }
+        Command::Benchmark {
+            input,
+            iterations,
+            json,
+        } => run_benchmark(&input, iterations, json),
     }
 }
 
-fn print_json(info: &ArtifactInfo) -> Result<(), String> {
+fn run_benchmark(input: &Path, iterations: u32, json: bool) -> Result<(), String> {
+    let report =
+        packforge_core::benchmark_file(input, iterations).map_err(|error| error.to_string())?;
+    if json {
+        return print_json(&report);
+    }
+
+    println!("benchmark {}", input.display());
+    println!("  iterations {} + 1 warm-up", report.iterations);
+    println!("  original   {} bytes", report.original_size);
+    println!();
+    println!(
+        "{:<10} {:<8} {:>12} {:>10} {:>12} {:>12}",
+        "profile", "codec", "container", "ratio", "pack median", "verify median"
+    );
+    for sample in report.profiles {
+        let ratio_whole = sample.payload_ratio_basis_points / 100;
+        let ratio_fraction = sample.payload_ratio_basis_points % 100;
+        let ratio = format!("{ratio_whole}.{ratio_fraction:02}%");
+        println!(
+            "{:<10} {:<8} {:>12} {:>10} {:>9.3} ms {:>9.3} ms",
+            sample.profile.as_str(),
+            sample.codec.as_str(),
+            sample.container_size,
+            ratio,
+            nanoseconds_to_milliseconds(sample.pack_nanoseconds_median),
+            nanoseconds_to_milliseconds(sample.verify_nanoseconds_median),
+        );
+    }
+    Ok(())
+}
+
+fn print_json(value: &impl serde::Serialize) -> Result<(), String> {
     let stdout = io::stdout();
     let mut output = stdout.lock();
-    serde_json::to_writer_pretty(&mut output, info).map_err(|error| error.to_string())?;
+    serde_json::to_writer_pretty(&mut output, value).map_err(|error| error.to_string())?;
     output.write_all(b"\n").map_err(|error| error.to_string())?;
     Ok(())
+}
+
+fn nanoseconds_to_milliseconds(nanoseconds: u64) -> f64 {
+    #[allow(clippy::cast_precision_loss)]
+    let nanoseconds = nanoseconds as f64;
+    nanoseconds / 1_000_000.0
 }
 
 fn print_human(info: &ArtifactInfo) {

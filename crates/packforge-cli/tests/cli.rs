@@ -106,3 +106,27 @@ fn cli_rejects_non_elf_input() {
     assert!(!output.status.success());
     assert!(String::from_utf8_lossy(&output.stderr).contains("not an ELF executable"));
 }
+
+#[test]
+fn cli_benchmark_reports_all_profiles() {
+    let directory = tempfile::tempdir().unwrap();
+    let input = directory.path().join("fixture");
+    fs::write(&input, fixture()).unwrap();
+
+    let output = packforge(&[
+        "benchmark",
+        input.to_str().unwrap(),
+        "--iterations",
+        "1",
+        "--json",
+    ]);
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(report["iterations"], 1);
+    assert_eq!(report["warmup_iterations"], 1);
+    assert_eq!(report["profiles"].as_array().unwrap().len(), 4);
+}
