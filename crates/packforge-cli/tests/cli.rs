@@ -53,6 +53,7 @@ fn cli_round_trip_and_json_reports() {
         String::from_utf8_lossy(&packed.stderr)
     );
     let packed_report: serde_json::Value = serde_json::from_slice(&packed.stdout).unwrap();
+    assert_eq!(packed_report["artifact_kind"], "container");
     assert_eq!(packed_report["profile"], "auto");
     assert_eq!(packed_report["verification"], "full");
 
@@ -75,6 +76,61 @@ fn cli_round_trip_and_json_reports() {
     ]);
     assert!(unpacked.status.success());
     assert_eq!(fs::read(&restored).unwrap(), fixture());
+}
+
+#[cfg(unix)]
+#[test]
+fn cli_self_contained_executable_round_trips_without_execution() {
+    use std::os::unix::fs::PermissionsExt as _;
+
+    let directory = tempfile::tempdir().unwrap();
+    let input = directory.path().join("fixture");
+    let executable = directory.path().join("fixture.packed");
+    let restored = directory.path().join("restored");
+    fs::write(&input, fixture()).unwrap();
+    fs::set_permissions(&input, fs::Permissions::from_mode(0o755)).unwrap();
+
+    let packed = packforge(&[
+        "pack",
+        input.to_str().unwrap(),
+        "--output",
+        executable.to_str().unwrap(),
+        "--artifact",
+        "executable",
+        "--allow-larger",
+        "--json",
+    ]);
+    assert!(
+        packed.status.success(),
+        "{}",
+        String::from_utf8_lossy(&packed.stderr)
+    );
+    let report: serde_json::Value = serde_json::from_slice(&packed.stdout).unwrap();
+    assert_eq!(report["artifact_kind"], "executable");
+    assert_eq!(report["executable_version"], 1);
+    assert_eq!(report["runtime_abi_version"], 1);
+    assert_eq!(report["container"]["profile"], "fast");
+
+    let inspected = packforge(&["inspect", executable.to_str().unwrap(), "--json"]);
+    assert!(inspected.status.success());
+    let report: serde_json::Value = serde_json::from_slice(&inspected.stdout).unwrap();
+    assert_eq!(report["artifact_kind"], "executable");
+    assert_eq!(report["verification"], "payload");
+
+    let verified = packforge(&["verify", executable.to_str().unwrap(), "--json"]);
+    assert!(verified.status.success());
+    let report: serde_json::Value = serde_json::from_slice(&verified.stdout).unwrap();
+    assert_eq!(report["verification"], "full");
+
+    let unpacked = packforge(&[
+        "unpack",
+        executable.to_str().unwrap(),
+        "--output",
+        restored.to_str().unwrap(),
+        "--json",
+    ]);
+    assert!(unpacked.status.success());
+    assert_eq!(fs::read(restored).unwrap(), fixture());
 }
 
 #[test]

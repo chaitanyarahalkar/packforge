@@ -4,6 +4,7 @@ on:
   push:
     branches: [main]
   pull_request:
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -13,14 +14,52 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@1.97.0
         with:
           components: clippy,rustfmt
+          targets: x86_64-unknown-linux-musl
+      - uses: actions/setup-go@v6
+        with:
+          go-version: 1.26.4
       - name: Format
         run: cargo fmt --all --check
       - name: Clippy
         run: cargo clippy --workspace --all-targets -- -D warnings
       - name: Test
         run: cargo test --workspace --locked
+      - name: Fuzz harnesses compile
+        run: cargo check --manifest-path fuzz/Cargo.toml --locked
+      - name: Runtime decoder and digest tests
+        working-directory: runtime/linux-x86_64
+        run: cargo test --target x86_64-unknown-linux-gnu --locked
+      - name: Runtime Clippy
+        working-directory: runtime/linux-x86_64
+        run: cargo clippy --bin packforge-runtime-linux-x86-64 --target x86_64-unknown-linux-musl --locked -- -D warnings
+      - name: Reproducible runtime artifact
+        run: bash scripts/build-runtime.sh --check
       - name: Static ELF round trip
         run: bash scripts/ci-linux-smoke.sh
+      - name: Self-contained executable round trip
+        run: bash scripts/ci-linux-executable-smoke.sh
+
+  benchmark:
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: dtolnay/rust-toolchain@1.97.0
+        with:
+          targets: x86_64-unknown-linux-musl
+      - uses: actions/setup-go@v6
+        with:
+          go-version: 1.26.4
+      - name: Install benchmark tools
+        run: sudo apt-get update && sudo apt-get install -y g++ curl xz-utils time
+      - name: Native executable benchmark
+        run: bash scripts/benchmark-linux-executable.sh 21 > benchmark.tsv
+      - name: Show benchmark
+        run: column -t -s $'\t' benchmark.tsv
+      - uses: actions/upload-artifact@v4
+        with:
+          name: packforge-linux-x86-64-benchmark
+          path: benchmark.tsv

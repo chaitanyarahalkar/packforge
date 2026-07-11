@@ -7,8 +7,9 @@ The packer tool will ship as a single binary per host platform and produce
 self-contained executables. The first supported target is Linux ELF on x86-64.
 
 > [!IMPORTANT]
-> Packforge is implementing M1: a deterministic, reversible `.pfg` container.
-> Native self-extracting executables begin in M2 and are not available yet.
+> Packforge's deterministic, reversible `.pfg` container is implemented. The M2
+> Linux x86-64 native runtime is available as an opt-in compatibility spike and
+> is not yet the default output.
 
 ## Why another packer?
 
@@ -30,7 +31,7 @@ single compression-ratio number.
 ## CLI
 
 ```text
-packforge pack [--profile fast|balanced|small|auto] <input> [-o <output>]
+packforge pack [--artifact container|executable] [--profile fast|balanced|small|auto] <input> [-o <output>]
 packforge unpack <input> [-o <output>]
 packforge inspect [--json] <input>
 packforge verify [--json] <input>
@@ -40,6 +41,12 @@ packforge benchmark [--iterations 5] [--json] <input>
 M1 accepts static, non-PIE, little-endian ELF64 x86-64 executables. It validates
 the ELF program-header table and rejects `PT_INTERP` and `PT_DYNAMIC` instead of
 silently claiming dynamic executables are supported.
+
+`pack --artifact executable --profile fast` produces a native Linux x86-64
+wrapper containing the freestanding loader, an embedded recovery container, and
+an integrity-checked fixed trailer. During the runtime spike, executable output is
+LZ4-only and remains opt-in; `fast` is selected automatically when `--profile`
+is omitted. `inspect`, `verify`, and `unpack` auto-detect both artifact kinds.
 
 `pack` produces a checksummed container. `inspect` validates the fixed header and
 compressed payload without decompressing. `verify` and `unpack` additionally
@@ -58,7 +65,9 @@ formats or binary features will fail closed without modifying the input.
 
 See the [product plan](docs/PRODUCT.md), [architecture](docs/ARCHITECTURE.md),
 [container format](docs/CONTAINER_FORMAT.md), [roadmap](docs/ROADMAP.md),
-[runtime spike](docs/RUNTIME_SPIKE.md), and [security policy](SECURITY.md).
+[self-contained executable format](docs/EXECUTABLE_FORMAT.md),
+[runtime spike](docs/RUNTIME_SPIKE.md), [benchmark method](docs/BENCHMARKING.md),
+and [security policy](SECURITY.md).
 
 ## Development
 
@@ -67,11 +76,14 @@ cargo fmt --check
 cargo clippy --workspace --all-targets -- -D warnings
 cargo test --workspace
 cargo run -p packforge-cli -- status
+bash scripts/build-runtime.sh --check
 ```
 
-The current implementation uses BLAKE3 for integrity, LZ4 for the fast profile,
-and Zstandard for balanced/small profiles. `auto` deterministically evaluates the
-stable candidates and selects the smallest compressed payload.
+The current implementation uses BLAKE3 for integrity. Recovery containers support
+LZ4 for `fast` and Zstandard for `balanced`/`small`; `auto` deterministically
+selects the smallest stable container payload. Self-contained executable output
+currently uses only the bounded LZ4 runtime. The measured Zstandard runtime
+experiment and its no-go result are documented under `runtime/zstd-spike/`.
 
 ## License
 

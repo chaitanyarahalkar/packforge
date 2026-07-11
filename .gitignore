@@ -1,5 +1,7 @@
-/target
+target/
 *.profraw
 *.profdata
 .DS_Store
-
+fuzz/artifacts/
+fuzz/corpus/
+fuzz/coverage/

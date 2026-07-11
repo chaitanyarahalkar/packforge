@@ -1,0 +1,38 @@
+[package]
+name = "packforge-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2024"
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+blake3 = "1.8.5"
+libfuzzer-sys = "0.4"
+packforge-core = { path = "../crates/packforge-core" }
+packforge-runtime-linux-x86-64 = { path = "../runtime/linux-x86_64" }
+
+[[bin]]
+name = "artifact_parsers"
+path = "fuzz_targets/artifact_parsers.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "runtime_lz4"
+path = "fuzz_targets/runtime_lz4.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "runtime_hash"
+path = "fuzz_targets/runtime_hash.rs"
+test = false
+doc = false
+bench = false
+
+[workspace]
+members = ["."]

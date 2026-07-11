@@ -255,7 +255,7 @@ pub enum ContainerError {
     },
     /// The original executable checksum is invalid.
     OriginalIntegrity,
-    /// Decompressed executable metadata differs from the authenticated header.
+    /// Decompressed executable metadata differs from the integrity-checked header.
     MetadataMismatch(&'static str),
     /// Compression would not reduce the total artifact size.
     NotBeneficial {
