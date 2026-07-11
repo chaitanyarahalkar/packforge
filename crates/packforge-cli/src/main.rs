@@ -1,12 +1,16 @@
 #![forbid(unsafe_code)]
 
 use std::ffi::OsString;
+use std::fmt;
 use std::io::{self, Write as _};
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
 use clap::{Parser, Subcommand, ValueEnum};
-use packforge_core::{ArtifactInfo, ArtifactReport, ExecutableInfo, PackOptions, Profile};
+use packforge_core::{
+    ArtifactInfo, ArtifactReport, Diagnostic, Error as CoreError, ExecutableInfo,
+    INTERNAL_DIAGNOSTIC, PackOptions, Profile,
+};
 
 /// A modern, transparent executable packer.
 #[derive(Debug, Parser)]
@@ -109,13 +113,46 @@ fn main() -> ExitCode {
     match run(Cli::parse()) {
         Ok(()) => ExitCode::SUCCESS,
         Err(error) => {
-            eprintln!("error: {error}");
-            ExitCode::from(1)
+            let diagnostic = error.diagnostic();
+            eprintln!("error[{}]: {error}", diagnostic.code);
+            ExitCode::from(diagnostic.exit_code())
         }
     }
 }
 
-fn run(cli: Cli) -> Result<(), String> {
+#[derive(Debug)]
+enum CliError {
+    Core(CoreError),
+    Json(serde_json::Error),
+    Output(io::Error),
+}
+
+impl CliError {
+    const fn diagnostic(&self) -> Diagnostic {
+        match self {
+            Self::Core(error) => error.diagnostic(),
+            Self::Json(_) | Self::Output(_) => INTERNAL_DIAGNOSTIC,
+        }
+    }
+}
+
+impl fmt::Display for CliError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Core(error) => error.fmt(formatter),
+            Self::Json(error) => write!(formatter, "could not serialize JSON report: {error}"),
+            Self::Output(error) => write!(formatter, "could not write command output: {error}"),
+        }
+    }
+}
+
+impl From<CoreError> for CliError {
+    fn from(error: CoreError) -> Self {
+        Self::Core(error)
+    }
+}
+
+fn run(cli: Cli) -> Result<(), CliError> {
     match cli.command {
         Command::Status => {
             println!("{}", packforge_core::project_stage().as_str());
@@ -140,12 +177,10 @@ fn run(cli: Cli) -> Result<(), String> {
             };
             let report = match artifact {
                 CliArtifact::Container => ArtifactReport::Container {
-                    info: packforge_core::pack_file(&input, &output, options)
-                        .map_err(|error| error.to_string())?,
+                    info: packforge_core::pack_file(&input, &output, options)?,
                 },
                 CliArtifact::Executable => ArtifactReport::Executable {
-                    info: packforge_core::pack_executable_file(&input, &output, options)
-                        .map_err(|error| error.to_string())?,
+                    info: packforge_core::pack_executable_file(&input, &output, options)?,
                 },
             };
             if json {
@@ -162,8 +197,7 @@ fn run(cli: Cli) -> Result<(), String> {
             json,
         } => {
             let output = output.unwrap_or_else(|| default_unpack_output(&input));
-            let report = packforge_core::unpack_artifact_file(&input, &output)
-                .map_err(|error| error.to_string())?;
+            let report = packforge_core::unpack_artifact_file(&input, &output)?;
             if json {
                 print_json(&report)?;
             } else {
@@ -173,8 +207,7 @@ fn run(cli: Cli) -> Result<(), String> {
             Ok(())
         }
         Command::Inspect { input, json } => {
-            let report =
-                packforge_core::inspect_artifact_file(&input).map_err(|error| error.to_string())?;
+            let report = packforge_core::inspect_artifact_file(&input)?;
             if json {
                 print_json(&report)?;
             } else {
@@ -183,8 +216,7 @@ fn run(cli: Cli) -> Result<(), String> {
             Ok(())
         }
         Command::Verify { input, json } => {
-            let report =
-                packforge_core::verify_artifact_file(&input).map_err(|error| error.to_string())?;
+            let report = packforge_core::verify_artifact_file(&input)?;
             if json {
                 print_json(&report)?;
             } else {
@@ -201,9 +233,8 @@ fn run(cli: Cli) -> Result<(), String> {
     }
 }
 
-fn run_benchmark(input: &Path, iterations: u32, json: bool) -> Result<(), String> {
-    let report =
-        packforge_core::benchmark_file(input, iterations).map_err(|error| error.to_string())?;
+fn run_benchmark(input: &Path, iterations: u32, json: bool) -> Result<(), CliError> {
+    let report = packforge_core::benchmark_file(input, iterations)?;
     if json {
         return print_json(&report);
     }
@@ -233,11 +264,11 @@ fn run_benchmark(input: &Path, iterations: u32, json: bool) -> Result<(), String
     Ok(())
 }
 
-fn print_json(value: &impl serde::Serialize) -> Result<(), String> {
+fn print_json(value: &impl serde::Serialize) -> Result<(), CliError> {
     let stdout = io::stdout();
     let mut output = stdout.lock();
-    serde_json::to_writer_pretty(&mut output, value).map_err(|error| error.to_string())?;
-    output.write_all(b"\n").map_err(|error| error.to_string())?;
+    serde_json::to_writer_pretty(&mut output, value).map_err(CliError::Json)?;
+    output.write_all(b"\n").map_err(CliError::Output)?;
     Ok(())
 }
 

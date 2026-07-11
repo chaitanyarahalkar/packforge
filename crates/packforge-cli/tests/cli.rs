@@ -148,6 +148,8 @@ fn cli_refuses_to_clobber_output() {
         container.to_str().unwrap(),
     ]);
     assert!(!output.status.success());
+    assert_eq!(output.status.code(), Some(7));
+    assert!(String::from_utf8_lossy(&output.stderr).starts_with("error[PFG4002]:"));
     assert!(String::from_utf8_lossy(&output.stderr).contains("refusing to overwrite"));
     assert_eq!(fs::read(&container).unwrap(), b"existing");
 }
@@ -160,7 +162,46 @@ fn cli_rejects_non_elf_input() {
 
     let output = packforge(&["pack", input.to_str().unwrap(), "--allow-larger"]);
     assert!(!output.status.success());
+    assert_eq!(output.status.code(), Some(3));
+    assert!(String::from_utf8_lossy(&output.stderr).starts_with("error[PFG1001]:"));
     assert!(String::from_utf8_lossy(&output.stderr).contains("not an ELF executable"));
+}
+
+#[test]
+fn cli_distinguishes_corrupt_artifacts_from_unsupported_inputs() {
+    let directory = tempfile::tempdir().unwrap();
+    let input = directory.path().join("fixture");
+    let container = directory.path().join("fixture.pfg");
+    fs::write(&input, fixture()).unwrap();
+    let packed = packforge(&[
+        "pack",
+        input.to_str().unwrap(),
+        "--output",
+        container.to_str().unwrap(),
+        "--allow-larger",
+    ]);
+    assert!(packed.status.success());
+
+    let mut bytes = fs::read(&container).unwrap();
+    let last = bytes.last_mut().unwrap();
+    *last ^= 0x80;
+    fs::write(&container, bytes).unwrap();
+
+    let output = packforge(&["inspect", container.to_str().unwrap()]);
+    assert_eq!(output.status.code(), Some(4));
+    assert!(String::from_utf8_lossy(&output.stderr).starts_with("error[PFG2002]:"));
+    assert!(String::from_utf8_lossy(&output.stderr).contains("payload checksum mismatch"));
+}
+
+#[test]
+fn cli_reports_bounded_requests_as_resource_failures() {
+    let directory = tempfile::tempdir().unwrap();
+    let input = directory.path().join("fixture");
+    fs::write(&input, fixture()).unwrap();
+
+    let output = packforge(&["benchmark", input.to_str().unwrap(), "--iterations", "0"]);
+    assert_eq!(output.status.code(), Some(5));
+    assert!(String::from_utf8_lossy(&output.stderr).starts_with("error[PFG3001]:"));
 }
 
 #[test]

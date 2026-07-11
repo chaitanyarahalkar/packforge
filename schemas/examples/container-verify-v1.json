@@ -1,0 +1,27 @@
+{
+  "artifact_kind": "container",
+  "schema_version": 1,
+  "container_version": 1,
+  "verification": "full",
+  "profile": "auto",
+  "codec": "zstd",
+  "codec_level": 19,
+  "original_size": 16384,
+  "payload_size": 58,
+  "container_size": 250,
+  "payload_ratio_basis_points": 35,
+  "original_digest": "14a388fac579ce3577d780ac12aca1cec51727bb2282bdd1fb087dc3fbded1e9",
+  "payload_digest": "a02b1e14c86fa97d5a3d8e7cfaab13257eb7eddc131fe7c5851836b1c8cdc860",
+  "original_mode": 493,
+  "binary": {
+    "format": "elf",
+    "class": "elf64",
+    "endianness": "little",
+    "architecture": "x86_64",
+    "binary_type": "static_executable",
+    "machine": 62,
+    "file_type": 2,
+    "entry_point": 4198400,
+    "load_segments": 1
+  }
+}

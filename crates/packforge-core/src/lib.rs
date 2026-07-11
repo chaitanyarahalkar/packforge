@@ -4,6 +4,7 @@
 
 mod benchmark;
 mod container;
+mod diagnostic;
 mod executable;
 mod format;
 mod manifest;
@@ -19,6 +20,7 @@ pub use container::{
     PackOptions, PackedArtifact, Profile, UnpackedArtifact, Verification, inspect, pack, unpack,
     verify,
 };
+pub use diagnostic::{Diagnostic, DiagnosticClass, INTERNAL_DIAGNOSTIC};
 pub use executable::{
     EXECUTABLE_TRAILER_LEN, EXECUTABLE_VERSION, ExecutableError, ExecutableInfo,
     LINUX_X86_64_RUNTIME, MAX_EXECUTABLE_SIZE, MAX_RUNTIME_STUB_SIZE, PackedExecutable,

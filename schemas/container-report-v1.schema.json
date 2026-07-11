@@ -1,0 +1,70 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/chaitanyarahalkar/packforge/schemas/container-report-v1.schema.json",
+  "title": "Packforge container operation report v1",
+  "description": "Stable JSON emitted by pack, inspect, verify, and unpack for a recovery container.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "artifact_kind",
+    "schema_version",
+    "container_version",
+    "verification",
+    "profile",
+    "codec",
+    "codec_level",
+    "original_size",
+    "payload_size",
+    "container_size",
+    "payload_ratio_basis_points",
+    "original_digest",
+    "payload_digest",
+    "original_mode",
+    "binary"
+  ],
+  "properties": {
+    "artifact_kind": {"const": "container"},
+    "schema_version": {"const": 1},
+    "container_version": {"const": 1},
+    "verification": {"enum": ["payload", "full"]},
+    "profile": {"enum": ["fast", "balanced", "small", "auto"]},
+    "codec": {"enum": ["lz4", "zstd"]},
+    "codec_level": {"type": "integer", "minimum": -7, "maximum": 22},
+    "original_size": {"type": "integer", "minimum": 1, "maximum": 1073741824},
+    "payload_size": {"type": "integer", "minimum": 1, "maximum": 1140850688},
+    "container_size": {"type": "integer", "minimum": 193, "maximum": 1140850880},
+    "payload_ratio_basis_points": {"type": "integer", "minimum": 1},
+    "original_digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "payload_digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "original_mode": {"type": "integer", "minimum": 0, "maximum": 4095},
+    "binary": {"$ref": "#/$defs/binary"}
+  },
+  "$defs": {
+    "binary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "format",
+        "class",
+        "endianness",
+        "architecture",
+        "binary_type",
+        "machine",
+        "file_type",
+        "entry_point",
+        "load_segments"
+      ],
+      "properties": {
+        "format": {"const": "elf"},
+        "class": {"const": "elf64"},
+        "endianness": {"const": "little"},
+        "architecture": {"const": "x86_64"},
+        "binary_type": {"const": "static_executable"},
+        "machine": {"const": 62},
+        "file_type": {"const": 2},
+        "entry_point": {"type": "integer", "minimum": 0},
+        "load_segments": {"type": "integer", "minimum": 1, "maximum": 65535}
+      }
+    }
+  }
+}

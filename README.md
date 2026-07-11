@@ -57,6 +57,11 @@ against the embedded format metadata.
 every stable profile. It checks byte-for-byte deterministic output and reports raw
 median/minimum pack and full-verification durations in its JSON schema.
 
+Failures use stable diagnostic identifiers and class-specific exit statuses; see
+the [CLI diagnostics contract](docs/DIAGNOSTICS.md). Container JSON output is
+defined by a strict [version 1 schema](schemas/container-report-v1.schema.json)
+with checked-in inspect and verify examples.
+
 ## Packforge vs. UPX
 
 The first native Linux x86-64 benchmark was run on 2026-07-11 using a GitHub-hosted
@@ -98,6 +103,7 @@ See the [product plan](docs/PRODUCT.md), [architecture](docs/ARCHITECTURE.md),
 [container format](docs/CONTAINER_FORMAT.md), [roadmap](docs/ROADMAP.md),
 [segment manifest](docs/MANIFEST_FORMAT.md),
 [self-contained executable format](docs/EXECUTABLE_FORMAT.md),
+[CLI diagnostics](docs/DIAGNOSTICS.md),
 [runtime spike](docs/RUNTIME_SPIKE.md), [benchmark method](docs/BENCHMARKING.md),
 and [security policy](SECURITY.md).
 
