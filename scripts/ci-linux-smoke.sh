@@ -76,7 +76,7 @@ exercise_profile() {
 
   local codec_metadata
   codec_metadata="$(python3 -c \
-    'import json,sys; value=json.load(open(sys.argv[1], encoding="utf-8")); print(f"{value[\"codec\"]}\t{value[\"codec_level\"]}")' \
+    'import json,sys; value=json.load(open(sys.argv[1], encoding="utf-8")); print("{}\t{}".format(value["codec"], value["codec_level"]))' \
     "$pack_report")"
   local original_digest
   local container_digest
