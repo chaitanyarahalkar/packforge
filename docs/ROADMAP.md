@@ -5,6 +5,11 @@ when its fixtures, negative tests, benchmarks, and documentation pass.
 
 ## M0 — Measurement and format contract
 
+**Status: in progress.** The container/report schema, deterministic codec selection,
+and bounded per-profile benchmark command exist. The C static-ELF fixture is the
+first versioned corpus entry; broader Rust/Go/C++ coverage and the pinned UPX
+baseline remain.
+
 - Pin the reference UPX version and benchmark environment.
 - Build a legal redistributable corpus across Rust, Go, C, and C++.
 - Define cold/warm startup, packed size, RSS, and decoder-memory measurements.
@@ -16,6 +21,11 @@ round-trips arbitrary bounded segment descriptions.
 
 ## M1 — Reversible container
 
+**Status: implementation in progress.** Host-side pack, inspect, verify, and
+unpack operations plus negative tests are present. Local formatting, Clippy, and
+the 16-test workspace suite pass. The milestone remains open until the real static
+ELF CI smoke test and the reference-corpus gates complete.
+
 - Parse and classify ELF headers without mutation.
 - Create a non-executable container holding compressed ranges and recovery data.
 - Implement inspect, verify, and byte-identical unpack.
@@ -25,6 +35,8 @@ round-trips arbitrary bounded segment descriptions.
 containers fail closed.
 
 ## M2 — Linux ELF x86-64 static executables
+
+**Status: not started.**
 
 - Implement the smallest native runtime stub.
 - Support a documented static, non-PIE `ET_EXEC` subset.
@@ -37,6 +49,8 @@ gates in `PRODUCT.md`.
 
 ## M3 — Linux ELF x86-64 PIE and dynamic linking
 
+**Status: not started.**
+
 - Add the required relocation subset and position independence.
 - Preserve TLS, auxiliary-vector expectations, and loader-visible metadata.
 - Test musl and glibc families independently.
@@ -47,6 +61,8 @@ pinned Linux distribution matrix.
 
 ## M4 — Linux ELF ARM64
 
+**Status: not started.**
+
 - Add an ARM64 runtime stub and relocation support.
 - Preserve BTI/PAC-related properties where applicable.
 - Run native and emulated cross-architecture verification.
@@ -56,6 +72,8 @@ x86-64.
 
 ## M5 — Windows PE x64 and ARM64
 
+**Status: not started.**
+
 - Design PE-specific manifest fields and loader behavior.
 - Support imports, base relocations, TLS callbacks, resources, CFG, and CET in
   explicit tiers.
@@ -64,6 +82,8 @@ x86-64.
 **Exit:** signed post-pack samples install and run on the pinned Windows matrix.
 
 ## M6 — Mach-O feasibility
+
+**Status: not started.**
 
 - Prototype x86-64 and ARM64 loaders without claiming stable support.
 - Test universal binaries, chained fixups, hardened runtime, signing, and
@@ -80,4 +100,3 @@ without fragile OS-version assumptions.
 - Reproducible release builds and SBOM/provenance output.
 - Antivirus false-positive reporting without evasive countermeasures.
 - Benchmark publication and honest comparison notes.
-
