@@ -1,0 +1,18 @@
+[package]
+name = "packforge-cli"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[[bin]]
+name = "packforge"
+path = "src/main.rs"
+
+[dependencies]
+packforge-core = { path = "../packforge-core" }
+
+[lints]
+workspace = true
+

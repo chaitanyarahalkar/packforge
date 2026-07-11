@@ -1,0 +1,20 @@
+[workspace]
+members = [
+    "crates/packforge-cli",
+    "crates/packforge-core",
+]
+resolver = "3"
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.85"
+license = "MIT"
+repository = "https://github.com/chaitanyarahalkar/packforge"
+
+[workspace.lints.rust]
+unsafe_code = "forbid"
+
+[workspace.lints.clippy]
+all = "deny"
+pedantic = "deny"
