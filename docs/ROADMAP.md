@@ -5,10 +5,11 @@ when its fixtures, negative tests, benchmarks, and documentation pass.
 
 ## M0 — Measurement and format contract
 
-**Status: in progress.** The container/report schema, deterministic codec selection,
-bounded per-profile benchmark command, C/C++/Rust/Go executable corpus, and pinned
-UPX 5.2.0 baseline exist. Cold-start infrastructure and completed release
-campaigns remain.
+**Status: complete.** Corpus v1, manifest v0, the benchmark-report schema, frozen
+environment metadata, raw warm/cold/RSS samples, deterministic aggregation, and
+the pinned UPX 5.2.0 evaluator are implemented. The first native baseline and a
+four-target sanitizer campaign are linked from `plans/M0.md`; current UPX
+performance gates fail explicitly and feed M2 optimization.
 
 - Keep the reference UPX version, asset digest, and benchmark environment pinned.
 - Build a legal redistributable corpus across Rust, Go, C, and C++.
@@ -16,10 +17,8 @@ campaigns remain.
 - Specify manifest v0 and stable JSON schemas for inspect/verify/benchmark.
 - Add fuzz harnesses for manifest decoding before accepting binary payloads.
 
-The repository now includes separate fuzz targets for container/executable
-parsers, the freestanding LZ4 decoder, and differential BLAKE3 validation. M0
-remains open until the versioned release campaigns complete without an unresolved
-failure.
+The repository includes separate fuzz targets for container/executable parsers,
+manifest v0, the freestanding LZ4 decoder, and differential BLAKE3 validation.
 
 **Exit:** benchmark harness produces a reproducible baseline and the manifest
 round-trips arbitrary bounded segment descriptions.
