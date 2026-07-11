@@ -24,11 +24,11 @@ runtime stub + manifest + compressed segments + recovery metadata
 ## Workspace shape
 
 - `packforge-cli`: command parsing, human/JSON output, and exit-code contract.
-- `packforge-core`: format-independent plans, compatibility reports, and operation
-  orchestration.
-- Future `packforge-elf`: bounded ELF parsing and reconstruction.
-- Future `packforge-codecs`: codec interface and profile selection.
-- Future `packforge-manifest`: versioned on-disk manifest with strict limits.
+- `packforge-core::format`: bounded ELF classification for the current stable tier.
+- `packforge-core::container`: versioned header, codecs, integrity, reconstruction,
+  and deterministic profile selection.
+- `packforge-core` host operations: bounded reads and atomic no-clobber writes.
+- Future `packforge-runtime`: target-specific loader logic shared by generated stubs.
 - `runtime/`: target-specific loader stubs built independently and embedded as
   versioned artifacts.
 
@@ -39,7 +39,10 @@ validates the manifest, reserves memory, reconstructs original load segments,
 applies the permitted relocation subset, finalizes memory permissions, clears
 temporary state, and transfers control to the original entry point.
 
-The initial static `ET_EXEC` tier deliberately avoids dynamic-linker emulation.
+The M1 container is deliberately non-executable: it proves deterministic packing,
+inspection, verification, and byte-identical recovery before runtime code is
+trusted. The initial M2 static `ET_EXEC` runtime tier deliberately avoids
+dynamic-linker emulation.
 PIE and dynamically linked executables are separate compatibility tiers because
 their relocation, TLS, loader, and security-property requirements are materially
 different.
@@ -99,4 +102,3 @@ environment snapshot. Resource usage is measured separately from correctness.
   workflow requirements.
 - Mach-O is last because code signing, notarization, hardened runtime behavior,
   universal binaries, chained fixups, and OS drift require a separate design.
-
