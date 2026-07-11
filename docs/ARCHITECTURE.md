@@ -28,21 +28,24 @@ runtime stub + manifest + compressed segments + recovery metadata
 - `packforge-core::container`: versioned header, codecs, integrity, reconstruction,
   and deterministic profile selection.
 - `packforge-core` host operations: bounded reads and atomic no-clobber writes.
-- Future `packforge-runtime`: target-specific loader logic shared by generated stubs.
-- `runtime/`: target-specific loader stubs built independently and embedded as
-  versioned artifacts.
+- `runtime/linux-x86_64`: independently built freestanding loader, compact BLAKE3,
+  bounded LZ4 decoder, and target-specific syscall logic.
+- `runtime/artifacts`: reproducible versioned loader binaries embedded by the host
+  packer and checked byte-for-byte in Linux CI.
 
-The first loader feasibility work is specified in the
+The active loader feasibility work is specified in the
 [Linux x86-64 runtime spike](RUNTIME_SPIKE.md). Its diskless `memfd_create` plus
 `execveat` path is an experimental compatibility launcher, not a substitute for
 the final format-aware M2 loader.
 
 ## Packed artifact model
 
-The output remains a valid native executable. A minimal loader stub starts first,
-validates the manifest, reserves memory, reconstructs original load segments,
-applies the permitted relocation subset, finalizes memory permissions, clears
-temporary state, and transfers control to the original entry point.
+The output remains a valid native executable. The current compatibility launcher
+validates and reconstructs the complete original image in bounded non-executable
+memory, writes it to a sealed executable `memfd`, and delegates final ELF loading
+to the kernel through `execveat`. A future format-aware loader would instead
+reconstruct load segments, apply an explicit relocation subset, finalize memory
+permissions, and transfer control to the original entry point.
 
 The M1 container is deliberately non-executable: it proves deterministic packing,
 inspection, verification, and byte-identical recovery before runtime code is

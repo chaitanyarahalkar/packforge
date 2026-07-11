@@ -6,15 +6,20 @@ when its fixtures, negative tests, benchmarks, and documentation pass.
 ## M0 — Measurement and format contract
 
 **Status: in progress.** The container/report schema, deterministic codec selection,
-and bounded per-profile benchmark command exist. The C static-ELF fixture is the
-first versioned corpus entry; broader Rust/Go/C++ coverage and the pinned UPX
-baseline remain.
+bounded per-profile benchmark command, C/C++/Rust/Go executable corpus, and pinned
+UPX 5.2.0 baseline exist. Cold-start infrastructure and completed release
+campaigns remain.
 
-- Pin the reference UPX version and benchmark environment.
+- Keep the reference UPX version, asset digest, and benchmark environment pinned.
 - Build a legal redistributable corpus across Rust, Go, C, and C++.
 - Define cold/warm startup, packed size, RSS, and decoder-memory measurements.
 - Specify manifest v0 and stable JSON schemas for inspect/verify/benchmark.
 - Add fuzz harnesses for manifest decoding before accepting binary payloads.
+
+The repository now includes separate fuzz targets for container/executable
+parsers, the freestanding LZ4 decoder, and differential BLAKE3 validation. M0
+remains open until the versioned release campaigns complete without an unresolved
+failure.
 
 **Exit:** benchmark harness produces a reproducible baseline and the manifest
 round-trips arbitrary bounded segment descriptions.
@@ -22,9 +27,9 @@ round-trips arbitrary bounded segment descriptions.
 ## M1 — Reversible container
 
 **Status: implementation in progress.** Host-side pack, inspect, verify, and
-unpack operations plus negative tests are present. Local formatting, Clippy, and
-the 16-test workspace suite pass. The milestone remains open until the real static
-ELF CI smoke test and the reference-corpus gates complete.
+unpack operations plus negative tests are present. Local formatting, Clippy, the
+workspace suite, and the real static-ELF round trip pass. The milestone remains
+open until the reference-corpus and fuzz-campaign gates complete.
 
 - Parse and classify ELF headers without mutation.
 - Create a non-executable container holding compressed ranges and recovery data.
@@ -36,13 +41,22 @@ containers fail closed.
 
 ## M2 — Linux ELF x86-64 static executables
 
-**Status: not started.**
+**Status: runtime spike in progress.** The fixed executable trailer, host-side
+wrapping/inspection/verification/recovery path, freestanding LZ4 runtime, and
+native Linux CI smoke gate are implemented. Static C, C++, Rust/musl, and Go
+fixtures pass byte-identical recovery and execution equivalence; the behavioral
+fixture also covers cwd, inherited descriptors, output, file effects, status, and
+signals. Native kernel-matrix and performance gates remain before executable
+output becomes the default. The `ruzstd` 0.8.3 experiment decoded the balanced
+payload correctly but added 59,936 bytes over its static I/O baseline, so it was
+rejected for the 32 KiB M2 loader budget rather than integrated.
 
 - Implement the smallest native runtime stub.
 - Support a documented static, non-PIE `ET_EXEC` subset.
 - Enforce W^X and payload integrity at runtime.
 - Differential-test behavior in isolated runners.
-- Ship fast, balanced, small, and auto profiles.
+- Ship fast first; balanced, small, and auto executable profiles require a
+  bounded decoder that passes the same runtime size gate.
 
 **Exit:** all stable-tier fixtures execute equivalently and meet the M2 release
 gates in `PRODUCT.md`.

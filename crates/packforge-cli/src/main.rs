@@ -1,10 +1,12 @@
+#![forbid(unsafe_code)]
+
 use std::ffi::OsString;
 use std::io::{self, Write as _};
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
 use clap::{Parser, Subcommand, ValueEnum};
-use packforge_core::{ArtifactInfo, PackOptions, Profile};
+use packforge_core::{ArtifactInfo, ArtifactReport, ExecutableInfo, PackOptions, Profile};
 
 /// A modern, transparent executable packer.
 #[derive(Debug, Parser)]
@@ -18,45 +20,48 @@ struct Cli {
 enum Command {
     /// Show the current implementation milestone.
     Status,
-    /// Create a deterministic reversible container.
+    /// Create a deterministic recovery container or self-contained executable.
     Pack {
         /// Static ELF x86-64 executable to pack.
         input: PathBuf,
-        /// Output path; defaults to INPUT.pfg.
+        /// Output path; defaults to INPUT.pfg or INPUT.packed by artifact kind.
         #[arg(short, long)]
         output: Option<PathBuf>,
-        /// Size/startup compression policy.
-        #[arg(long, value_enum, default_value_t = CliProfile::Balanced)]
-        profile: CliProfile,
-        /// Keep the container even when it is not smaller than the input.
+        /// Artifact kind; native executable output is opt-in during the runtime spike.
+        #[arg(long, value_enum, default_value_t = CliArtifact::Container)]
+        artifact: CliArtifact,
+        /// Size/startup policy; defaults to balanced for containers and fast for executables.
+        #[arg(long, value_enum)]
+        profile: Option<CliProfile>,
+        /// Keep the selected artifact even when it is not smaller than the input.
         #[arg(long)]
         allow_larger: bool,
         /// Emit the operation report as JSON.
         #[arg(long)]
         json: bool,
     },
-    /// Recover a byte-identical executable from a container.
+    /// Recover a byte-identical executable from either Packforge artifact kind.
     Unpack {
-        /// Packforge container to unpack.
+        /// Packforge container or self-contained executable to unpack.
         input: PathBuf,
-        /// Output path; defaults to INPUT without .pfg.
+        /// Output path; removes .pfg/.packed when present, otherwise adds .unpacked.
         #[arg(short, long)]
         output: Option<PathBuf>,
         /// Emit the operation report as JSON.
         #[arg(long)]
         json: bool,
     },
-    /// Validate and display header and compressed-payload metadata.
+    /// Validate and display wrapper, header, and compressed-payload metadata.
     Inspect {
-        /// Packforge container to inspect.
+        /// Packforge container or self-contained executable to inspect.
         input: PathBuf,
         /// Emit the report as JSON.
         #[arg(long)]
         json: bool,
     },
-    /// Decompress and fully validate a container without writing output.
+    /// Fully validate either Packforge artifact kind without writing output.
     Verify {
-        /// Packforge container to verify.
+        /// Packforge container or self-contained executable to verify.
         input: PathBuf,
         /// Emit the report as JSON.
         #[arg(long)]
@@ -81,6 +86,12 @@ enum CliProfile {
     Balanced,
     Small,
     Auto,
+}
+
+#[derive(Debug, Clone, Copy, ValueEnum)]
+enum CliArtifact {
+    Container,
+    Executable,
 }
 
 impl From<CliProfile> for Profile {
@@ -113,25 +124,35 @@ fn run(cli: Cli) -> Result<(), String> {
         Command::Pack {
             input,
             output,
+            artifact,
             profile,
             allow_larger,
             json,
         } => {
-            let output = output.unwrap_or_else(|| default_pack_output(&input));
-            let info = packforge_core::pack_file(
-                &input,
-                &output,
-                PackOptions {
-                    profile: profile.into(),
-                    allow_larger,
+            let output = output.unwrap_or_else(|| default_pack_output(&input, artifact));
+            let default_profile = match artifact {
+                CliArtifact::Container => Profile::Balanced,
+                CliArtifact::Executable => Profile::Fast,
+            };
+            let options = PackOptions {
+                profile: profile.map_or(default_profile, Profile::from),
+                allow_larger,
+            };
+            let report = match artifact {
+                CliArtifact::Container => ArtifactReport::Container {
+                    info: packforge_core::pack_file(&input, &output, options)
+                        .map_err(|error| error.to_string())?,
                 },
-            )
-            .map_err(|error| error.to_string())?;
+                CliArtifact::Executable => ArtifactReport::Executable {
+                    info: packforge_core::pack_executable_file(&input, &output, options)
+                        .map_err(|error| error.to_string())?,
+                },
+            };
             if json {
-                print_json(&info)?;
+                print_json(&report)?;
             } else {
                 println!("packed {} -> {}", input.display(), output.display());
-                print_human(&info);
+                print_report(&report);
             }
             Ok(())
         }
@@ -141,32 +162,34 @@ fn run(cli: Cli) -> Result<(), String> {
             json,
         } => {
             let output = output.unwrap_or_else(|| default_unpack_output(&input));
-            let info =
-                packforge_core::unpack_file(&input, &output).map_err(|error| error.to_string())?;
+            let report = packforge_core::unpack_artifact_file(&input, &output)
+                .map_err(|error| error.to_string())?;
             if json {
-                print_json(&info)?;
+                print_json(&report)?;
             } else {
                 println!("unpacked {} -> {}", input.display(), output.display());
-                print_human(&info);
+                print_report(&report);
             }
             Ok(())
         }
         Command::Inspect { input, json } => {
-            let info = packforge_core::inspect_file(&input).map_err(|error| error.to_string())?;
+            let report =
+                packforge_core::inspect_artifact_file(&input).map_err(|error| error.to_string())?;
             if json {
-                print_json(&info)?;
+                print_json(&report)?;
             } else {
-                print_human(&info);
+                print_report(&report);
             }
             Ok(())
         }
         Command::Verify { input, json } => {
-            let info = packforge_core::verify_file(&input).map_err(|error| error.to_string())?;
+            let report =
+                packforge_core::verify_artifact_file(&input).map_err(|error| error.to_string())?;
             if json {
-                print_json(&info)?;
+                print_json(&report)?;
             } else {
                 println!("verified {}", input.display());
-                print_human(&info);
+                print_report(&report);
             }
             Ok(())
         }
@@ -244,17 +267,45 @@ fn print_human(info: &ArtifactInfo) {
     println!("  payload hash  {}", info.payload_digest);
 }
 
-fn default_pack_output(input: &Path) -> PathBuf {
+fn print_report(report: &ArtifactReport) {
+    match report {
+        ArtifactReport::Container { info } => {
+            println!("  artifact      container");
+            print_human(info);
+        }
+        ArtifactReport::Executable { info } => print_executable(info),
+    }
+}
+
+fn print_executable(info: &ExecutableInfo) {
+    println!("  artifact      executable");
+    println!("  wrapper       v{}", info.executable_version);
+    println!("  runtime ABI   v{}", info.runtime_abi_version);
+    println!("  loader        {} bytes", info.loader_size);
+    println!("  executable    {} bytes", info.executable_size);
+    println!("  loader hash   {}", info.loader_digest);
+    print_human(&info.container);
+}
+
+fn default_pack_output(input: &Path, artifact: CliArtifact) -> PathBuf {
     let mut output = OsString::from(input.as_os_str());
-    output.push(".pfg");
+    output.push(match artifact {
+        CliArtifact::Container => ".pfg",
+        CliArtifact::Executable => ".packed",
+    });
     PathBuf::from(output)
 }
 
 fn default_unpack_output(input: &Path) -> PathBuf {
-    if let Some(name) = input.file_name().and_then(|name| name.to_str())
-        && let Some(stripped) = name.strip_suffix(".pfg")
-        && !stripped.is_empty()
-    {
+    let stripped = input
+        .file_name()
+        .and_then(|name| name.to_str())
+        .and_then(|name| {
+            name.strip_suffix(".pfg")
+                .or_else(|| name.strip_suffix(".packed"))
+        })
+        .filter(|stripped| !stripped.is_empty());
+    if let Some(stripped) = stripped {
         return input.with_file_name(stripped);
     }
     let mut output = OsString::from(input.as_os_str());
@@ -266,13 +317,17 @@ fn default_unpack_output(input: &Path) -> PathBuf {
 mod tests {
     use std::path::Path;
 
-    use super::{default_pack_output, default_unpack_output};
+    use super::{CliArtifact, default_pack_output, default_unpack_output};
 
     #[test]
     fn derives_pack_output_without_losing_extension() {
         assert_eq!(
-            default_pack_output(Path::new("hello.bin")),
+            default_pack_output(Path::new("hello.bin"), CliArtifact::Container),
             Path::new("hello.bin.pfg")
+        );
+        assert_eq!(
+            default_pack_output(Path::new("hello.bin"), CliArtifact::Executable),
+            Path::new("hello.bin.packed")
         );
     }
 
@@ -280,6 +335,10 @@ mod tests {
     fn derives_unpack_output_from_container_suffix() {
         assert_eq!(
             default_unpack_output(Path::new("hello.bin.pfg")),
+            Path::new("hello.bin")
+        );
+        assert_eq!(
+            default_unpack_output(Path::new("hello.bin.packed")),
             Path::new("hello.bin")
         );
     }

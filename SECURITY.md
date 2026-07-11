@@ -13,7 +13,7 @@ stubs, signature spoofing, or security-product evasion features.
 
 - Input parsing must use checked arithmetic and bounded allocations.
 - Corrupt or unsupported inputs must fail closed before output replacement.
-- Decompression limits must be derived from authenticated manifest metadata and
+- Decompression limits must be derived from integrity-checked manifest metadata and
   independently capped by the runtime.
 - Packed payload integrity must be verified before control is transferred.
 - Runtime memory must follow W^X: writable during reconstruction, then executable
@@ -34,4 +34,3 @@ its initial releases.
 
 Until a private reporting channel is configured, do not open public issues for a
 suspected vulnerability. Contact the repository owner privately through GitHub.
-

@@ -27,15 +27,16 @@ in Rust, Go, C, or C++.
 | Host | Linux x86-64; macOS x86-64/ARM64 for the packer CLI |
 | Output | Linux ELF x86-64 executable |
 | Binary class | Static, non-PIE `ET_EXEC` first |
-| Payload | Loadable segments plus reconstruction metadata |
-| Codecs | LZ4-class fast profile and Zstandard balanced/small profiles |
+| Payload | Complete byte-identical original image plus recovery metadata |
+| Codecs | LZ4 executable runtime; LZ4 and Zstandard recovery containers |
 | Operations | Pack, unpack, inspect, verify, benchmark |
 | Integrity | BLAKE3-class payload and original-image digests |
 | Determinism | Byte-identical output for identical inputs and configuration |
 
-Codec and hash crates will be selected only after decoder-size, maintenance, and
-licensing evaluation. Names above describe the intended algorithm families, not
-locked dependencies.
+The current implementation pins its codec and hash dependencies. New executable
+runtime decoders are admitted only after code-size, bounded-memory, maintenance,
+and licensing evaluation; the first Zstandard candidate failed the runtime size
+gate and remains an isolated experiment.
 
 ## Non-goals
 
@@ -76,4 +77,3 @@ These are hypotheses until measured. Failed targets stay visible in release note
   benchmark method.
 - Make `inspect` and `verify` safe for automation with stable JSON output.
 - Refuse to pack when the output would be larger unless explicitly forced.
-

@@ -1,0 +1,27 @@
+[package]
+name = "packforge-runtime-linux-x86-64"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[[bin]]
+name = "packforge-runtime-linux-x86-64"
+path = "src/main.rs"
+test = false
+bench = false
+
+[workspace]
+
+[dev-dependencies]
+blake3 = { version = "1.8.5", features = ["pure"] }
+lz4_flex = { version = "0.13.1", default-features = false, features = ["safe-encode", "std"] }
+
+[profile.dev]
+panic = "abort"
+
+[profile.release]
+codegen-units = 1
+lto = "fat"
+opt-level = "z"
+panic = "abort"
+strip = "symbols"

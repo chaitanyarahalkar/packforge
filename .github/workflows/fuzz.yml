@@ -1,0 +1,39 @@
+name: Fuzz campaign
+
+on:
+  workflow_dispatch:
+    inputs:
+      seconds:
+        description: Seconds per fuzz target
+        required: true
+        default: "60"
+
+permissions:
+  contents: read
+
+jobs:
+  fuzz:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: dtolnay/rust-toolchain@nightly
+      - name: Install cargo-fuzz
+        run: cargo install cargo-fuzz --locked
+      - name: Run bounded campaigns
+        env:
+          FUZZ_SECONDS: ${{ inputs.seconds }}
+        run: |
+          [[ "$FUZZ_SECONDS" =~ ^[0-9]+$ ]]
+          test "$FUZZ_SECONDS" -ge 1
+          test "$FUZZ_SECONDS" -le 3600
+          for target in artifact_parsers runtime_lz4 runtime_hash; do
+            cargo fuzz run "$target" -- \
+              -max_total_time="$FUZZ_SECONDS" \
+              -max_len=1048576
+          done
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: packforge-fuzz-artifacts
+          path: fuzz/artifacts
+          if-no-files-found: ignore

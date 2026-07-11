@@ -1,0 +1,25 @@
+[package]
+name = "packforge-zstd-runtime-spike"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+[workspace]
+
+[dependencies]
+ruzstd = { version = "0.8.3", default-features = false }
+
+[[bin]]
+name = "io-baseline"
+path = "src/io_baseline.rs"
+
+[[bin]]
+name = "ruzstd-decoder"
+path = "src/ruzstd_decoder.rs"
+
+[profile.release]
+codegen-units = 1
+lto = "fat"
+opt-level = "z"
+panic = "abort"
+strip = "symbols"

@@ -1,7 +1,10 @@
 //! Safe host-side operations for Packforge containers.
 
+#![forbid(unsafe_code)]
+
 mod benchmark;
 mod container;
+mod executable;
 mod format;
 
 use std::fmt;
@@ -15,6 +18,12 @@ pub use container::{
     PackOptions, PackedArtifact, Profile, UnpackedArtifact, Verification, inspect, pack, unpack,
     verify,
 };
+pub use executable::{
+    EXECUTABLE_TRAILER_LEN, EXECUTABLE_VERSION, ExecutableError, ExecutableInfo,
+    LINUX_X86_64_RUNTIME, MAX_EXECUTABLE_SIZE, MAX_RUNTIME_STUB_SIZE, PackedExecutable,
+    RUNTIME_ABI_VERSION, UnpackedExecutable, inspect_executable, pack_executable,
+    unpack_executable, verify_executable,
+};
 pub use format::{
     Architecture, BinaryClass, BinaryFormat, BinaryInfo, BinaryType, Endianness, FormatError,
     classify,
@@ -25,6 +34,8 @@ pub use format::{
 pub enum ProjectStage {
     /// Reversible container and verification operations are implemented.
     ReversibleContainer,
+    /// A native self-contained executable runtime is under compatibility testing.
+    RuntimeSpike,
 }
 
 impl ProjectStage {
@@ -33,6 +44,7 @@ impl ProjectStage {
     pub const fn as_str(self) -> &'static str {
         match self {
             Self::ReversibleContainer => "reversible-container",
+            Self::RuntimeSpike => "runtime-spike",
         }
     }
 }
@@ -42,6 +54,8 @@ impl ProjectStage {
 pub enum Error {
     /// Container or executable validation failed.
     Container(ContainerError),
+    /// Self-contained executable validation failed.
+    Executable(ExecutableError),
     /// A filesystem operation failed.
     Io {
         /// Operation being attempted.
@@ -55,12 +69,17 @@ pub enum Error {
     NotRegularFile(PathBuf),
     /// The output exists; Packforge never clobbers by default.
     OutputExists(PathBuf),
+    /// An artifact is neither a recovery container nor a packed executable.
+    UnknownArtifact,
+    /// Native output requires an executable input file mode.
+    InputNotExecutable(PathBuf),
 }
 
 impl fmt::Display for Error {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Container(error) => error.fmt(formatter),
+            Self::Executable(error) => error.fmt(formatter),
             Self::Io {
                 operation,
                 path,
@@ -78,6 +97,12 @@ impl fmt::Display for Error {
                 "refusing to overwrite existing output {}; choose another path",
                 path.display()
             ),
+            Self::UnknownArtifact => formatter.write_str("input is not a Packforge artifact"),
+            Self::InputNotExecutable(path) => write!(
+                formatter,
+                "input is not executable: {}; set an execute permission before packing native output",
+                path.display()
+            ),
         }
     }
 }
@@ -86,8 +111,12 @@ impl std::error::Error for Error {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
             Self::Container(error) => Some(error),
+            Self::Executable(error) => Some(error),
             Self::Io { source, .. } => Some(source),
-            Self::NotRegularFile(_) | Self::OutputExists(_) => None,
+            Self::NotRegularFile(_)
+            | Self::OutputExists(_)
+            | Self::UnknownArtifact
+            | Self::InputNotExecutable(_) => None,
         }
     }
 }
@@ -98,10 +127,34 @@ impl From<ContainerError> for Error {
     }
 }
 
+impl From<ExecutableError> for Error {
+    fn from(error: ExecutableError) -> Self {
+        Self::Executable(error)
+    }
+}
+
+/// Metadata returned by auto-detecting artifact operations.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+#[serde(tag = "artifact_kind", rename_all = "snake_case")]
+pub enum ArtifactReport {
+    /// A standalone reversible PFG container.
+    Container {
+        /// Existing container report fields remain at the JSON top level.
+        #[serde(flatten)]
+        info: ArtifactInfo,
+    },
+    /// A native self-contained executable.
+    Executable {
+        /// Executable wrapper and embedded-container report fields.
+        #[serde(flatten)]
+        info: ExecutableInfo,
+    },
+}
+
 /// Returns the current implementation stage.
 #[must_use]
 pub const fn project_stage() -> ProjectStage {
-    ProjectStage::ReversibleContainer
+    ProjectStage::RuntimeSpike
 }
 
 /// Packs a supported executable and atomically creates a new container file.
@@ -120,6 +173,94 @@ pub fn pack_file(
     let artifact = pack(&input, original_mode, options)?;
     write_new(output_path, &artifact.bytes, 0o644)?;
     Ok(artifact.info)
+}
+
+/// Packs a supported executable into a native self-contained Linux artifact.
+///
+/// # Errors
+///
+/// Returns [`Error`] when input I/O, executable permissions, validation,
+/// compression, runtime wrapping, or atomic output creation fails.
+pub fn pack_executable_file(
+    input_path: &Path,
+    output_path: &Path,
+    options: PackOptions,
+) -> Result<ExecutableInfo, Error> {
+    let (input, metadata) = read_bounded(input_path, MAX_ORIGINAL_SIZE)?;
+    let original_mode = file_mode(&metadata);
+    if original_mode & 0o111 == 0 {
+        return Err(Error::InputNotExecutable(input_path.to_path_buf()));
+    }
+    let artifact = pack_executable(&input, original_mode, options, LINUX_X86_64_RUNTIME)?;
+    write_new(output_path, &artifact.bytes, original_mode & 0o777)?;
+    Ok(artifact.info)
+}
+
+/// Inspects either a recovery container or a self-contained executable.
+///
+/// # Errors
+///
+/// Returns [`Error`] when the input cannot be read, its artifact kind is not
+/// recognized, or framing and compressed-payload validation fails.
+pub fn inspect_artifact_file(input_path: &Path) -> Result<ArtifactReport, Error> {
+    let (input, _) = read_bounded(input_path, MAX_EXECUTABLE_SIZE)?;
+    match detect_artifact(&input)? {
+        ArtifactKind::Container => Ok(ArtifactReport::Container {
+            info: inspect(&input)?,
+        }),
+        ArtifactKind::Executable => Ok(ArtifactReport::Executable {
+            info: inspect_executable(&input)?,
+        }),
+    }
+}
+
+/// Fully verifies either supported artifact kind without executing it.
+///
+/// # Errors
+///
+/// Returns [`Error`] when artifact detection, wrapper/container validation,
+/// decompression, digest validation, or metadata reclassification fails.
+pub fn verify_artifact_file(input_path: &Path) -> Result<ArtifactReport, Error> {
+    let (input, _) = read_bounded(input_path, MAX_EXECUTABLE_SIZE)?;
+    match detect_artifact(&input)? {
+        ArtifactKind::Container => Ok(ArtifactReport::Container {
+            info: verify(&input)?,
+        }),
+        ArtifactKind::Executable => Ok(ArtifactReport::Executable {
+            info: verify_executable(&input)?,
+        }),
+    }
+}
+
+/// Recovers the original executable from either supported artifact kind.
+///
+/// # Errors
+///
+/// Returns [`Error`] when verification fails or the no-clobber output cannot be
+/// created and synchronized.
+pub fn unpack_artifact_file(
+    input_path: &Path,
+    output_path: &Path,
+) -> Result<ArtifactReport, Error> {
+    let (input, _) = read_bounded(input_path, MAX_EXECUTABLE_SIZE)?;
+    match detect_artifact(&input)? {
+        ArtifactKind::Container => {
+            let artifact = unpack(&input)?;
+            let mode = recovered_mode(artifact.info.original_mode);
+            write_new(output_path, &artifact.bytes, mode)?;
+            Ok(ArtifactReport::Container {
+                info: artifact.info,
+            })
+        }
+        ArtifactKind::Executable => {
+            let artifact = unpack_executable(&input)?;
+            let mode = recovered_mode(artifact.info.container.original_mode);
+            write_new(output_path, &artifact.bytes, mode)?;
+            Ok(ArtifactReport::Executable {
+                info: artifact.info,
+            })
+        }
+    }
 }
 
 /// Inspects a container without decompressing its executable payload.
@@ -160,6 +301,35 @@ pub fn unpack_file(input_path: &Path, output_path: &Path) -> Result<ArtifactInfo
     };
     write_new(output_path, &artifact.bytes, mode)?;
     Ok(artifact.info)
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ArtifactKind {
+    Container,
+    Executable,
+}
+
+fn detect_artifact(input: &[u8]) -> Result<ArtifactKind, Error> {
+    if input.get(..8) == Some(b"PFGCNT01") {
+        return Ok(ArtifactKind::Container);
+    }
+    if input
+        .len()
+        .checked_sub(EXECUTABLE_TRAILER_LEN)
+        .and_then(|offset| input.get(offset..offset + 8))
+        == Some(b"PFGEXE01")
+    {
+        return Ok(ArtifactKind::Executable);
+    }
+    Err(Error::UnknownArtifact)
+}
+
+const fn recovered_mode(original_mode: u32) -> u32 {
+    if original_mode == 0 {
+        0o755
+    } else {
+        original_mode
+    }
 }
 
 /// Benchmarks every stable profile without creating an output file.
@@ -279,8 +449,8 @@ mod tests {
     use super::{ProjectStage, project_stage};
 
     #[test]
-    fn reports_reversible_container_stage() {
-        assert_eq!(project_stage(), ProjectStage::ReversibleContainer);
-        assert_eq!(project_stage().as_str(), "reversible-container");
+    fn reports_runtime_spike_stage() {
+        assert_eq!(project_stage(), ProjectStage::RuntimeSpike);
+        assert_eq!(project_stage().as_str(), "runtime-spike");
     }
 }

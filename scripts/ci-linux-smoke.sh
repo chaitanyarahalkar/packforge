@@ -8,7 +8,11 @@ trap 'rm -rf "$scratch"' EXIT
 original="$scratch/hello-static"
 container="$scratch/hello-static.pfg"
 restored="$scratch/hello-restored"
-packer="$workspace/target/release/packforge"
+target_dir="${CARGO_TARGET_DIR:-$workspace/target}"
+if [[ "$target_dir" != /* ]]; then
+  target_dir="$workspace/$target_dir"
+fi
+packer="$target_dir/release/packforge"
 
 cc -O2 -Wall -Wextra -Werror -static -no-pie \
   "$workspace/tests/fixtures/hello-static.c" -o "$original"
