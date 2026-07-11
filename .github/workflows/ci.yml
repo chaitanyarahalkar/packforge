@@ -21,6 +21,7 @@ jobs:
       - uses: actions/setup-go@v6
         with:
           go-version: 1.26.4
+          cache: false
       - name: Format
         run: cargo fmt --all --check
       - name: Clippy
@@ -57,6 +58,7 @@ jobs:
       - uses: actions/setup-go@v6
         with:
           go-version: 1.26.4
+          cache: false
       - name: Install benchmark tools
         run: sudo apt-get update && sudo apt-get install -y g++ curl xz-utils time
       - name: Native executable benchmark
@@ -66,12 +68,15 @@ jobs:
         run: |
           mkdir -p benchmark-output
           bash scripts/benchmark-linux-executable.sh 21 7 > benchmark-output/summary.tsv
+          python3 scripts/benchmark_contract.py metadata \
+            --output benchmark-output/metadata.json \
+            --source-run-url "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" \
+            --runner "$RUNNER_NAME"
           python3 scripts/benchmark_contract.py report \
             --summary benchmark-output/summary.tsv \
             --raw benchmark-output/raw-samples.tsv \
+            --metadata benchmark-output/metadata.json \
             --output benchmark-output/report.json \
-            --source-run-url "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" \
-            --runner "$RUNNER_NAME" \
             --cold-cache-reset linux_drop_caches_3
           python3 scripts/benchmark_contract.py evaluate \
             benchmark-output/report.json > benchmark-output/gates.json

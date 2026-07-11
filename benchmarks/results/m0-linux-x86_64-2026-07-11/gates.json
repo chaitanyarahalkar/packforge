@@ -1,0 +1,9 @@
+{
+  "correctness_pass": true,
+  "size_limit_basis_points": 10500,
+  "size_packforge_over_upx_basis_points": 15678,
+  "size_pass": false,
+  "cold_packforge_over_upx_basis_points": 14042,
+  "cold_pass": false,
+  "release_pass": false
+}

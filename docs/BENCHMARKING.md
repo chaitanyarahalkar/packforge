@@ -50,14 +50,19 @@ selected. Cold iterations are zero or an odd count from 3 through 31.
 Construct and evaluate the versioned JSON report with:
 
 ```bash
+python3 scripts/benchmark_contract.py metadata \
+  --output benchmark-output/metadata.json
 python3 scripts/benchmark_contract.py report \
   --summary benchmark-output/summary.tsv \
   --raw benchmark-output/raw-samples.tsv \
+  --metadata benchmark-output/metadata.json \
   --output benchmark-output/report.json
 python3 scripts/benchmark_contract.py evaluate benchmark-output/report.json
 ```
 
-The evaluator always reports failed performance gates. Pass `--enforce` only for
+Metadata is collected exactly once and retained with the raw samples, making
+subsequent report assembly byte-for-byte deterministic. The evaluator always
+reports failed performance gates. Pass `--enforce` only for
 a release gate; ordinary development and baseline runs must retain failing data.
 The authoritative contract and exit evidence are in `plans/M0.md`.
 

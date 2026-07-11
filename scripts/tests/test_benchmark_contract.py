@@ -3,6 +3,7 @@ import json
 import tempfile
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
 
 
 SCRIPT = Path(__file__).parents[1] / "benchmark_contract.py"
@@ -77,6 +78,36 @@ class BenchmarkContractTests(unittest.TestCase):
         with schema.open(encoding="utf-8") as stream:
             value = json.load(stream)
         self.assertEqual(value["$schema"], "https://json-schema.org/draft/2020-12/schema")
+
+    def test_checked_in_native_report_revalidates(self):
+        report_path = Path(__file__).parents[2] / (
+            "benchmarks/results/m0-linux-x86_64-2026-07-11/report.json"
+        )
+        with report_path.open(encoding="utf-8") as stream:
+            report = json.load(stream)
+        benchmark_contract.validate_report(report)
+        report["gates"]["release_pass"] = True
+        with self.assertRaises(benchmark_contract.ContractError):
+            benchmark_contract.validate_report(report)
+
+    def test_checked_in_samples_reaggregate_deterministically(self):
+        workspace = Path(__file__).parents[2]
+        result = workspace / "benchmarks/results/m0-linux-x86_64-2026-07-11"
+        arguments = SimpleNamespace(
+            workspace=workspace,
+            corpus=workspace / "benchmarks/corpus-v1.json",
+            summary=result / "summary.tsv",
+            raw=result / "raw-samples.tsv",
+            metadata=result / "metadata.json",
+            cold_cache_reset="linux_drop_caches_3",
+        )
+        first = benchmark_contract.build_report(arguments)
+        second = benchmark_contract.build_report(arguments)
+        self.assertEqual(first, second)
+        self.assertEqual(
+            json.dumps(first, indent=2) + "\n",
+            (result / "report.json").read_text(encoding="utf-8"),
+        )
 
 
 if __name__ == "__main__":

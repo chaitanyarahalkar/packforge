@@ -10,6 +10,7 @@ import hashlib
 import json
 import os
 import platform
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -215,9 +216,46 @@ def calculate_gates(fixtures: list[dict[str, Any]]) -> dict[str, Any]:
     }
 
 
+def collect_metadata(arguments: argparse.Namespace) -> dict[str, Any]:
+    workspace = arguments.workspace.resolve()
+    architecture = platform.machine()
+    if architecture != "x86_64":
+        raise ContractError(f"native report requires x86_64, got {architecture}")
+    packforge_binary = workspace / "target/release/packforge"
+    return {
+        "generated_at_utc": arguments.generated_at_utc,
+        "source_commit": git_commit(workspace),
+        "source_run_url": arguments.source_run_url,
+        "environment": {
+            "os": os_name(),
+            "kernel": platform.release(),
+            "architecture": architecture,
+            "cpu": cpu_name(),
+            "runner": arguments.runner,
+        },
+        "tools": {
+            "cc": first_line(["cc", "--version"]),
+            "cpp": first_line(["c++", "--version"]),
+            "rustc": first_line(["rustc", "--version"]),
+            "go": first_line(["go", "version"]),
+            "packforge": first_line([str(packforge_binary), "--version"]),
+            "upx": "5.2.0",
+        },
+    }
+
+
 def build_report(arguments: argparse.Namespace) -> dict[str, Any]:
     workspace = arguments.workspace.resolve()
     corpus = validate_corpus(workspace, arguments.corpus)
+    metadata = load_json(arguments.metadata)
+    if set(metadata) != {
+        "generated_at_utc",
+        "source_commit",
+        "source_run_url",
+        "environment",
+        "tools",
+    }:
+        raise ContractError("metadata has missing or unknown fields")
     summary_rows = read_tsv(arguments.summary, SUMMARY_FIELDS)
     raw_rows = read_tsv(arguments.raw, RAW_FIELDS)
 
@@ -295,30 +333,9 @@ def build_report(arguments: argparse.Namespace) -> dict[str, Any]:
 
     if warm_iterations is None or cold_iterations is None:
         raise ContractError("benchmark report contains no fixture data")
-    architecture = platform.machine()
-    if architecture != "x86_64":
-        raise ContractError(f"native report requires x86_64, got {architecture}")
-    packforge_binary = workspace / "target/release/packforge"
     report = {
         "schema_version": 1,
-        "generated_at_utc": dt.datetime.now(dt.timezone.utc).isoformat().replace("+00:00", "Z"),
-        "source_commit": git_commit(workspace),
-        "source_run_url": arguments.source_run_url,
-        "environment": {
-            "os": os_name(),
-            "kernel": platform.release(),
-            "architecture": architecture,
-            "cpu": cpu_name(),
-            "runner": arguments.runner,
-        },
-        "tools": {
-            "cc": first_line(["cc", "--version"]),
-            "cpp": first_line(["c++", "--version"]),
-            "rustc": first_line(["rustc", "--version"]),
-            "go": first_line(["go", "version"]),
-            "packforge": first_line([str(packforge_binary), "--version"]),
-            "upx": "5.2.0",
-        },
+        **metadata,
         "configuration": {
             "packforge_profile": "fast",
             "upx_mode": "--best",
@@ -334,11 +351,84 @@ def build_report(arguments: argparse.Namespace) -> dict[str, Any]:
 
 
 def validate_report(report: dict[str, Any]) -> None:
+    required_top_level = {
+        "schema_version",
+        "generated_at_utc",
+        "source_commit",
+        "source_run_url",
+        "environment",
+        "tools",
+        "configuration",
+        "fixtures",
+        "gates",
+    }
+    if set(report) != required_top_level:
+        raise ContractError("report has missing or unknown top-level fields")
     if report.get("schema_version") != 1:
         raise ContractError("report schema_version must be 1")
+    if not re.fullmatch(r"[0-9a-f]{40}", report.get("source_commit", "")):
+        raise ContractError("report source_commit must be a full lowercase Git digest")
+    environment = report.get("environment")
+    if not isinstance(environment, dict) or environment.get("architecture") != "x86_64":
+        raise ContractError("report environment must describe native x86_64")
+    tools = report.get("tools")
+    if not isinstance(tools, dict) or tools.get("upx") != "5.2.0":
+        raise ContractError("report must use the pinned UPX 5.2.0 baseline")
+    configuration = report.get("configuration")
+    if not isinstance(configuration, dict):
+        raise ContractError("report configuration must be an object")
+    if configuration.get("packforge_profile") != "fast" or configuration.get("upx_mode") != "--best":
+        raise ContractError("report has unsupported benchmark configuration")
+    warm_iterations = configuration.get("warm_iterations")
+    cold_iterations = configuration.get("cold_iterations")
+    if not isinstance(warm_iterations, int) or not 3 <= warm_iterations <= 101:
+        raise ContractError("report warm iteration count is invalid")
+    if not isinstance(cold_iterations, int) or not 0 <= cold_iterations <= 31:
+        raise ContractError("report cold iteration count is invalid")
     fixtures = report.get("fixtures")
     if not isinstance(fixtures, list) or not fixtures:
         raise ContractError("report fixtures must be a nonempty array")
+    identifiers: set[str] = set()
+    for fixture in fixtures:
+        if not isinstance(fixture, dict):
+            raise ContractError("report fixture must be an object")
+        identifier = fixture.get("id")
+        if not isinstance(identifier, str) or identifier in identifiers:
+            raise ContractError("report fixture IDs must be unique strings")
+        identifiers.add(identifier)
+        if not re.fullmatch(r"[0-9a-f]{64}", fixture.get("source_sha256", "")):
+            raise ContractError(f"fixture {identifier} has invalid source digest")
+        artifacts = fixture.get("artifacts")
+        if not isinstance(artifacts, list) or len(artifacts) != 3:
+            raise ContractError(f"fixture {identifier} must contain three artifacts")
+        for artifact in artifacts:
+            if not isinstance(artifact, dict):
+                raise ContractError(f"fixture {identifier} artifact must be an object")
+            if artifact.get("kind") not in ARTIFACT_KINDS:
+                raise ContractError(f"fixture {identifier} has unknown artifact kind")
+            if not re.fullmatch(r"[0-9a-f]{64}", artifact.get("sha256", "")):
+                raise ContractError(f"fixture {identifier} artifact has invalid digest")
+            for field in ("bytes", "ratio_basis_points"):
+                if not isinstance(artifact.get(field), int) or artifact[field] <= 0:
+                    raise ContractError(f"fixture {identifier} artifact has invalid {field}")
+            for field in ("behavior_matches_original", "reversible", "deterministic"):
+                if not isinstance(artifact.get(field), bool):
+                    raise ContractError(f"fixture {identifier} artifact has invalid {field}")
+            for metric, expected_count in (
+                ("warm_time_ns", warm_iterations),
+                ("cold_time_ns", cold_iterations),
+                ("peak_rss_kib", warm_iterations),
+            ):
+                measurement = artifact.get(metric)
+                if not isinstance(measurement, dict) or set(measurement) != {"median", "values"}:
+                    raise ContractError(f"fixture {identifier} artifact has invalid {metric}")
+                values = measurement["values"]
+                if not isinstance(values, list) or len(values) != expected_count:
+                    raise ContractError(f"fixture {identifier} artifact has wrong {metric} count")
+                if any(not isinstance(value, int) or value < 0 for value in values):
+                    raise ContractError(f"fixture {identifier} artifact has invalid {metric} sample")
+                if measurement["median"] != integer_median(values):
+                    raise ContractError(f"fixture {identifier} artifact has invalid {metric} median")
     expected = calculate_gates(fixtures)
     if report.get("gates") != expected:
         raise ContractError("embedded benchmark gates do not match artifact measurements")
@@ -347,6 +437,13 @@ def validate_report(report: dict[str, Any]) -> None:
 def command_validate_corpus(arguments: argparse.Namespace) -> int:
     corpus = validate_corpus(arguments.workspace.resolve(), arguments.corpus)
     print(f"validated corpus v{corpus['schema_version']}: {len(corpus['fixtures'])} fixtures")
+    return 0
+
+
+def command_metadata(arguments: argparse.Namespace) -> int:
+    metadata = collect_metadata(arguments)
+    arguments.output.write_text(json.dumps(metadata, indent=2) + "\n", encoding="utf-8")
+    print(f"wrote native benchmark metadata for {metadata['source_commit']}")
     return 0
 
 
@@ -379,14 +476,24 @@ def parser() -> argparse.ArgumentParser:
     corpus.add_argument("--corpus", type=Path, default=Path("benchmarks/corpus-v1.json"))
     corpus.set_defaults(function=command_validate_corpus)
 
+    metadata = subcommands.add_parser("metadata")
+    metadata.add_argument("--workspace", type=Path, default=Path("."))
+    metadata.add_argument("--output", type=Path, required=True)
+    metadata.add_argument("--source-run-url", default="local")
+    metadata.add_argument("--runner", default=os.environ.get("RUNNER_NAME", "local"))
+    metadata.add_argument(
+        "--generated-at-utc",
+        default=dt.datetime.now(dt.timezone.utc).isoformat().replace("+00:00", "Z"),
+    )
+    metadata.set_defaults(function=command_metadata)
+
     report = subcommands.add_parser("report")
     report.add_argument("--workspace", type=Path, default=Path("."))
     report.add_argument("--corpus", type=Path, default=Path("benchmarks/corpus-v1.json"))
     report.add_argument("--summary", type=Path, required=True)
     report.add_argument("--raw", type=Path, required=True)
+    report.add_argument("--metadata", type=Path, required=True)
     report.add_argument("--output", type=Path, required=True)
-    report.add_argument("--source-run-url", default=os.environ.get("GITHUB_SERVER_URL", ""))
-    report.add_argument("--runner", default=os.environ.get("RUNNER_NAME", "local"))
     report.add_argument(
         "--cold-cache-reset",
         choices=("none", "linux_drop_caches_3"),

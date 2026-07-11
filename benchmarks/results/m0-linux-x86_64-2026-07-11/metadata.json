@@ -1,0 +1,20 @@
+{
+  "generated_at_utc": "2026-07-11T23:23:21.462344Z",
+  "source_commit": "f5de1314c3831bd92f6f18aec9d718f279ec1139",
+  "source_run_url": "https://github.com/chaitanyarahalkar/packforge/actions/runs/29172003145",
+  "environment": {
+    "os": "Ubuntu 24.04.4 LTS",
+    "kernel": "6.17.0-1018-azure",
+    "architecture": "x86_64",
+    "cpu": "AMD EPYC 9V74 80-Core Processor",
+    "runner": "GitHub Actions 1000025185"
+  },
+  "tools": {
+    "cc": "cc (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0",
+    "cpp": "c++ (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0",
+    "rustc": "rustc 1.97.0 (2d8144b78 2026-07-07)",
+    "go": "go version go1.26.4 linux/amd64",
+    "packforge": "packforge-cli 0.1.0",
+    "upx": "5.2.0"
+  }
+}

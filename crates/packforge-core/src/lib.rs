@@ -6,6 +6,7 @@ mod benchmark;
 mod container;
 mod executable;
 mod format;
+mod manifest;
 
 use std::fmt;
 use std::fs;
@@ -27,6 +28,10 @@ pub use executable::{
 pub use format::{
     Architecture, BinaryClass, BinaryFormat, BinaryInfo, BinaryType, Endianness, FormatError,
     classify,
+};
+pub use manifest::{
+    MANIFEST_HEADER_LEN, MANIFEST_SEGMENT_LEN, MANIFEST_VERSION, MAX_MANIFEST_MEMORY_SIZE,
+    MAX_MANIFEST_SEGMENTS, ManifestError, ManifestSegment, ManifestV0, decode_manifest_v0,
 };
 
 /// The current implementation stage.

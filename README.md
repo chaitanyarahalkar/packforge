@@ -96,6 +96,7 @@ formats or binary features will fail closed without modifying the input.
 
 See the [product plan](docs/PRODUCT.md), [architecture](docs/ARCHITECTURE.md),
 [container format](docs/CONTAINER_FORMAT.md), [roadmap](docs/ROADMAP.md),
+[segment manifest](docs/MANIFEST_FORMAT.md),
 [self-contained executable format](docs/EXECUTABLE_FORMAT.md),
 [runtime spike](docs/RUNTIME_SPIKE.md), [benchmark method](docs/BENCHMARKING.md),
 and [security policy](SECURITY.md).

@@ -34,5 +34,12 @@ test = false
 doc = false
 bench = false
 
+[[bin]]
+name = "manifest_parser"
+path = "fuzz_targets/manifest_parser.rs"
+test = false
+doc = false
+bench = false
+
 [workspace]
 members = ["."]
