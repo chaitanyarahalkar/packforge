@@ -32,6 +32,11 @@ runtime stub + manifest + compressed segments + recovery metadata
 - `runtime/`: target-specific loader stubs built independently and embedded as
   versioned artifacts.
 
+The first loader feasibility work is specified in the
+[Linux x86-64 runtime spike](RUNTIME_SPIKE.md). Its diskless `memfd_create` plus
+`execveat` path is an experimental compatibility launcher, not a substitute for
+the final format-aware M2 loader.
+
 ## Packed artifact model
 
 The output remains a valid native executable. A minimal loader stub starts first,
