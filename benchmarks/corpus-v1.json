@@ -1,0 +1,48 @@
+{
+  "schema_version": 1,
+  "license": "MIT",
+  "behavioral_oracle": {
+    "arguments": ["round-trip"],
+    "environment": {"PACKFORGE_SMOKE": "benchmark"},
+    "comparison": "exact_stdout_stderr_and_exit_status"
+  },
+  "fixtures": [
+    {
+      "id": "hello-c",
+      "language": "c",
+      "source": "tests/fixtures/hello-static.c",
+      "source_sha256": "2c7fa189f40553e015ca69e8bdbce72114e644121de5f7e219550f3f7c9b8a5d",
+      "target": "x86_64-unknown-linux-gnu-static-non-pie",
+      "compiler": "cc",
+      "arguments": ["-O2", "-Wall", "-Wextra", "-Werror", "-static", "-no-pie"]
+    },
+    {
+      "id": "hello-cpp",
+      "language": "cpp",
+      "source": "tests/fixtures/hello-static.cc",
+      "source_sha256": "ebe7f233233add9f7a0c4124c040b553f461789f3e3732d33e18bbaa7d1e6801",
+      "target": "x86_64-unknown-linux-gnu-static-non-pie",
+      "compiler": "c++",
+      "arguments": ["-O2", "-Wall", "-Wextra", "-Werror", "-static", "-no-pie"]
+    },
+    {
+      "id": "hello-rust",
+      "language": "rust",
+      "source": "tests/fixtures/hello-static.rs",
+      "source_sha256": "9856008b670e77d5fab7ecc92757836ff7a76af2ab6226cba5ac8b930bfc9696",
+      "target": "x86_64-unknown-linux-musl-static-non-pie",
+      "compiler": "rustc",
+      "arguments": ["--target", "x86_64-unknown-linux-musl", "-C", "opt-level=2", "-C", "relocation-model=static", "-C", "link-arg=-no-pie", "-C", "strip=symbols"]
+    },
+    {
+      "id": "hello-go",
+      "language": "go",
+      "source": "tests/fixtures/hello-static.go",
+      "source_sha256": "42b3f43ca20d11e882a189d8644d248da264efaaca9f926be6a06c7763d74a8d",
+      "target": "linux-amd64-pure-static",
+      "compiler": "go",
+      "environment": {"CGO_ENABLED": "0", "GOOS": "linux", "GOARCH": "amd64"},
+      "arguments": ["build", "-trimpath", "-ldflags=-s -w -buildid="]
+    }
+  ]
+}

@@ -2,6 +2,8 @@ target/
 *.profraw
 *.profdata
 .DS_Store
+__pycache__/
+*.pyc
 fuzz/artifacts/
 fuzz/corpus/
 fuzz/coverage/
