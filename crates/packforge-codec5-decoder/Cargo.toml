@@ -9,6 +9,7 @@ publish = false
 
 [dev-dependencies]
 packforge-codec5-sys = { path = "../packforge-codec5-sys" }
+packforge-runtime-hash = { path = "../packforge-runtime-hash", features = ["lzma", "optimized"] }
 
 [lints]
 workspace = true

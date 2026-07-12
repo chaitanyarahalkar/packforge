@@ -5,6 +5,7 @@ use std::path::Path;
 use std::time::Instant;
 
 use packforge_codec5_decoder::{apultra, bcj2};
+use packforge_runtime_hash as hash;
 
 fn median(samples: &mut [u128]) -> u128 {
     samples.sort_unstable();
@@ -40,6 +41,7 @@ fn main() {
     assert!(arguments.next().is_none(), "too many arguments");
 
     let original = fs::read(original_path).expect("cannot read runtime image");
+    let expected_hash = hash::hash(&original);
     let prefix = Path::new(&prefix);
     let main_compressed = read(prefix, ".main.apu");
     let call_compressed = read(prefix, ".call.apu");
@@ -53,6 +55,7 @@ fn main() {
     let mut call_samples = Vec::with_capacity(iterations);
     let mut jump_samples = Vec::with_capacity(iterations);
     let mut bcj2_samples = Vec::with_capacity(iterations);
+    let mut hash_samples = Vec::with_capacity(iterations);
 
     for _ in 0..iterations {
         let start = Instant::now();
@@ -80,14 +83,19 @@ fn main() {
         )
         .expect("BCJ2 decode failed");
         bcj2_samples.push(start.elapsed().as_nanos());
-        assert_eq!(output, original, "runtime image mismatch");
+
+        let start = Instant::now();
+        let actual_hash = hash::hash(black_box(&output));
+        hash_samples.push(start.elapsed().as_nanos());
+        assert_eq!(actual_hash, expected_hash, "runtime image mismatch");
     }
 
     println!(
-        "{}\t{}\t{}\t{}",
+        "{}\t{}\t{}\t{}\t{}",
         median(&mut main_samples),
         median(&mut call_samples),
         median(&mut jump_samples),
-        median(&mut bcj2_samples)
+        median(&mut bcj2_samples),
+        median(&mut hash_samples)
     );
 }

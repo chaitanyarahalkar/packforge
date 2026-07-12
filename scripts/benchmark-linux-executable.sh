@@ -399,12 +399,10 @@ for label in hello-c hello-cpp hello-rust hello-go; do
             "$apultra_runtime" "$apultra_prefix" 21)"
         IFS=$'\t' read -r apultra_rust_main apultra_rust_call \
             apultra_rust_jump apultra_rust_bcj2 apultra_rust_original_hash <<< "$(
-                cd "$workspace/runtime/linux-x86_64"
                 cargo run --quiet --release --locked \
                     --config 'profile.release.package.packforge-runtime-hash.opt-level="z"' \
                     --config 'profile.release.package.packforge-codec5-decoder.opt-level=2' \
-                    --features apultra-bcj2,optimized-hash \
-                    --example codec5_pipeline_profile -- \
+                    -p packforge-codec5-decoder --example m2_codec5_profile -- \
                     "$apultra_runtime" "$apultra_prefix" 21
             )"
         apultra_manifest_size="$(python3 -c \
