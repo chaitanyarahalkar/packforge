@@ -100,6 +100,12 @@ pub struct ElfInfo {
     pub entry_point: u64,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct OutputLayout {
+    pub start: u64,
+    pub length: u64,
+}
+
 pub fn parse_trailer(bytes: &[u8; TRAILER_LEN], file_length: u64) -> Result<Trailer, Error> {
     if &bytes[..8] != TRAILER_MAGIC
         || get_u16(bytes, 8) != 2
@@ -309,6 +315,44 @@ pub fn parse_manifest(input: &[u8], expected_original_size: u64) -> Result<Manif
     })
 }
 
+pub fn direct_output_layout(manifest: &Manifest) -> Result<OutputLayout, Error> {
+    let first = manifest.segments.first().ok_or(Error::Manifest)?;
+    let load_bias = first
+        .virtual_address
+        .checked_sub(first.file_offset)
+        .ok_or(Error::Range)?;
+    if load_bias < PAGE_SIZE || load_bias & (PAGE_SIZE - 1) != 0 {
+        return Err(Error::Manifest);
+    }
+    let mut end = load_bias
+        .checked_add(manifest.original_size)
+        .ok_or(Error::Range)?;
+    for segment in manifest.segments.iter().take(manifest.count) {
+        if segment
+            .virtual_address
+            .checked_sub(segment.file_offset)
+            != Some(load_bias)
+        {
+            return Err(Error::Manifest);
+        }
+        end = end.max(
+            segment
+                .virtual_address
+                .checked_add(segment.memory_size)
+                .ok_or(Error::Range)?,
+        );
+    }
+    end = align_up(end, PAGE_SIZE)?;
+    let length = end.checked_sub(load_bias).ok_or(Error::Range)?;
+    if length == 0 || length > MAX_ORIGINAL_SIZE {
+        return Err(Error::Range);
+    }
+    Ok(OutputLayout {
+        start: load_bias,
+        length,
+    })
+}
+
 pub fn validate_elf(original: &[u8], manifest: &Manifest) -> Result<ElfInfo, Error> {
     let header = original.get(..64).ok_or(Error::Elf)?;
     if header.get(..7) != Some(b"\x7fELF\x02\x01\x01")
@@ -429,7 +473,8 @@ mod tests {
     use std::vec;
 
     use super::{
-        Error, HEADER_LEN, MANIFEST_HEADER_LEN, MANIFEST_SEGMENT_LEN, parse_header, parse_manifest,
+        Error, HEADER_LEN, MANIFEST_HEADER_LEN, MANIFEST_SEGMENT_LEN, direct_output_layout,
+        parse_header, parse_manifest,
     };
 
     #[test]
@@ -442,7 +487,7 @@ mod tests {
         manifest[12..14].copy_from_slice(&(MANIFEST_SEGMENT_LEN as u16).to_le_bytes());
         manifest[14..16].copy_from_slice(&1u16.to_le_bytes());
         manifest[24..32].copy_from_slice(&4096u64.to_le_bytes());
-        manifest[32..40].copy_from_slice(&0x401000u64.to_le_bytes());
+        manifest[32..40].copy_from_slice(&0x400100u64.to_le_bytes());
         let offset = MANIFEST_HEADER_LEN;
         manifest[offset + 8..offset + 16].copy_from_slice(&4096u64.to_le_bytes());
         manifest[offset + 16..offset + 24].copy_from_slice(&0x401000u64.to_le_bytes());
@@ -450,5 +495,37 @@ mod tests {
         manifest[offset + 32..offset + 40].copy_from_slice(&4096u64.to_le_bytes());
         manifest[offset + 40..offset + 44].copy_from_slice(&7u32.to_le_bytes());
         assert_eq!(parse_manifest(&manifest, 4096), Err(Error::Permissions));
+    }
+
+    #[test]
+    fn requires_one_bounded_direct_output_bias() {
+        let mut manifest = vec![0u8; MANIFEST_HEADER_LEN + 2 * MANIFEST_SEGMENT_LEN];
+        manifest[..8].copy_from_slice(b"PFGMAN00");
+        manifest[10..12].copy_from_slice(&(MANIFEST_HEADER_LEN as u16).to_le_bytes());
+        manifest[12..14].copy_from_slice(&(MANIFEST_SEGMENT_LEN as u16).to_le_bytes());
+        manifest[14..16].copy_from_slice(&2u16.to_le_bytes());
+        manifest[24..32].copy_from_slice(&0x3000u64.to_le_bytes());
+        manifest[32..40].copy_from_slice(&0x400100u64.to_le_bytes());
+        for (index, (file, address, flags)) in
+            [(0u64, 0x400000u64, 5u32), (0x2000, 0x402000, 4)]
+                .into_iter()
+                .enumerate()
+        {
+            let offset = MANIFEST_HEADER_LEN + index * MANIFEST_SEGMENT_LEN;
+            manifest[offset..offset + 8].copy_from_slice(&file.to_le_bytes());
+            manifest[offset + 8..offset + 16].copy_from_slice(&0x1000u64.to_le_bytes());
+            manifest[offset + 16..offset + 24].copy_from_slice(&address.to_le_bytes());
+            manifest[offset + 24..offset + 32].copy_from_slice(&0x1000u64.to_le_bytes());
+            manifest[offset + 32..offset + 40].copy_from_slice(&0x1000u64.to_le_bytes());
+            manifest[offset + 40..offset + 44].copy_from_slice(&flags.to_le_bytes());
+        }
+        let parsed = parse_manifest(&manifest, 0x3000).unwrap();
+        assert_eq!(direct_output_layout(&parsed).unwrap().start, 0x400000);
+
+        manifest[MANIFEST_HEADER_LEN + MANIFEST_SEGMENT_LEN + 16
+            ..MANIFEST_HEADER_LEN + MANIFEST_SEGMENT_LEN + 24]
+            .copy_from_slice(&0x403000u64.to_le_bytes());
+        let parsed = parse_manifest(&manifest, 0x3000).unwrap();
+        assert_eq!(direct_output_layout(&parsed), Err(Error::Manifest));
     }
 }

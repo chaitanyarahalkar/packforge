@@ -5,6 +5,7 @@ use std::fmt;
 use packforge_lzma_decoder as lzma;
 use serde::Serialize;
 
+use crate::MAX_ORIGINAL_SIZE;
 use crate::container::{HEADER_LEN, MAX_CONTAINER_SIZE, PackOptions, Profile, Verification};
 use crate::executable::EXECUTABLE_TRAILER_LEN;
 use crate::manifest::{
@@ -39,6 +40,7 @@ const TARGET_X86_64: u16 = 62;
 const MIN_DICTIONARY_SIZE: u32 = 1 << 12;
 const MAX_DICTIONARY_SIZE: u32 = 1 << 26;
 const FIXED_LZMA_PROPERTIES: u8 = 0x5d;
+const PAGE_SIZE: u64 = 4096;
 
 /// Reproducible fail-closed `ET_DYN` artifact used while direct mapping is built.
 pub const LINUX_X86_64_RUNTIME_V2: &[u8] = include_bytes!(concat!(
@@ -132,6 +134,8 @@ pub enum ExecutableV2Error {
     TrailingBytes { expected: u8, actual: u8 },
     /// Recovered ELF metadata differs from the authenticated manifest.
     ManifestMismatch,
+    /// Load segments cannot share one bounded direct-output address span.
+    UnsupportedDirectOutputLayout,
     /// The complete executable would not reduce artifact size.
     NotBeneficial { original: u64, executable: u64 },
     /// A host length cannot be represented safely.
@@ -173,6 +177,8 @@ impl fmt::Display for ExecutableV2Error {
             Self::ManifestMismatch => {
                 formatter.write_str("recovered ELF does not match its authenticated manifest")
             }
+            Self::UnsupportedDirectOutputLayout => formatter
+                .write_str("executable v2 load segments do not share a bounded output layout"),
             Self::NotBeneficial {
                 original,
                 executable,
@@ -253,6 +259,7 @@ pub fn pack_executable_v2(
     }
     validate_loader(loader)?;
     let manifest = manifest_from_elf(original)?;
+    validate_direct_output_layout(&manifest)?;
     let manifest_bytes = manifest.encode()?;
     let original_length = usize_to_u64(original.len(), "original executable")?;
     let reduce_size = u32::try_from(original.len())
@@ -438,6 +445,7 @@ fn parse(executable: &[u8]) -> Result<ParsedExecutable<'_>, ExecutableV2Error> {
     if manifest.original_size != header.original_length {
         return Err(ExecutableV2Error::ManifestMismatch);
     }
+    validate_direct_output_layout(&manifest)?;
     Ok(ParsedExecutable {
         payload,
         header,
@@ -482,6 +490,45 @@ fn validate_loader(loader: &[u8]) -> Result<(), ExecutableV2Error> {
         || loader.get(18..20) != Some(&TARGET_X86_64.to_le_bytes())
     {
         return Err(ExecutableV2Error::InvalidLoader);
+    }
+    Ok(())
+}
+
+fn validate_direct_output_layout(manifest: &ManifestV0) -> Result<(), ExecutableV2Error> {
+    let first = manifest
+        .segments
+        .first()
+        .ok_or(ExecutableV2Error::UnsupportedDirectOutputLayout)?;
+    let load_bias = first
+        .virtual_address
+        .checked_sub(first.file_offset)
+        .ok_or(ExecutableV2Error::UnsupportedDirectOutputLayout)?;
+    if load_bias < PAGE_SIZE || load_bias & (PAGE_SIZE - 1) != 0 {
+        return Err(ExecutableV2Error::UnsupportedDirectOutputLayout);
+    }
+    let mut end = load_bias
+        .checked_add(manifest.original_size)
+        .ok_or(ExecutableV2Error::UnsupportedDirectOutputLayout)?;
+    for segment in &manifest.segments {
+        if segment.virtual_address.checked_sub(segment.file_offset) != Some(load_bias) {
+            return Err(ExecutableV2Error::UnsupportedDirectOutputLayout);
+        }
+        end = end.max(
+            segment
+                .virtual_address
+                .checked_add(segment.memory_size)
+                .ok_or(ExecutableV2Error::UnsupportedDirectOutputLayout)?,
+        );
+    }
+    let end = end
+        .checked_add(PAGE_SIZE - 1)
+        .map(|value| value & !(PAGE_SIZE - 1))
+        .ok_or(ExecutableV2Error::UnsupportedDirectOutputLayout)?;
+    let length = end
+        .checked_sub(load_bias)
+        .ok_or(ExecutableV2Error::UnsupportedDirectOutputLayout)?;
+    if length == 0 || length > MAX_ORIGINAL_SIZE {
+        return Err(ExecutableV2Error::UnsupportedDirectOutputLayout);
     }
     Ok(())
 }
@@ -717,9 +764,11 @@ fn hex(bytes: &[u8; 32]) -> String {
 mod tests {
     use super::{
         EXECUTABLE_V2_HEADER_LEN, ExecutableV2Error, PackOptions, Profile, Verification,
-        inspect_executable_v2, pack_executable_v2, unpack_executable_v2, verify_executable_v2,
+        inspect_executable_v2, pack_executable_v2, unpack_executable_v2,
+        validate_direct_output_layout, verify_executable_v2,
     };
-    use crate::LINUX_X86_64_RUNTIME_V2;
+    use crate::{LINUX_X86_64_RUNTIME_V2, MAX_ORIGINAL_SIZE};
+    use crate::{ManifestSegment, ManifestV0};
 
     fn fixture() -> Vec<u8> {
         let mut bytes = vec![0u8; 16_384];
@@ -812,6 +861,44 @@ mod tests {
         assert!(matches!(
             inspect_executable_v2(&trailer),
             Err(ExecutableV2Error::Integrity("trailer"))
+        ));
+    }
+
+    #[test]
+    fn rejects_inconsistent_or_oversized_direct_output_spans() {
+        let mut manifest = ManifestV0 {
+            original_size: 0x3000,
+            entry_point: 0x0040_0100,
+            segments: vec![
+                ManifestSegment {
+                    file_offset: 0,
+                    file_size: 0x1000,
+                    virtual_address: 0x0040_0000,
+                    memory_size: 0x1000,
+                    alignment: 0x1000,
+                    flags: 5,
+                },
+                ManifestSegment {
+                    file_offset: 0x2000,
+                    file_size: 0x1000,
+                    virtual_address: 0x0040_2000,
+                    memory_size: 0x1000,
+                    alignment: 0x1000,
+                    flags: 4,
+                },
+            ],
+        };
+        assert!(validate_direct_output_layout(&manifest).is_ok());
+        manifest.segments[1].virtual_address = 0x0040_3000;
+        assert!(matches!(
+            validate_direct_output_layout(&manifest),
+            Err(ExecutableV2Error::UnsupportedDirectOutputLayout)
+        ));
+        manifest.segments[1].file_offset = MAX_ORIGINAL_SIZE;
+        manifest.segments[1].virtual_address = 0x0040_0000 + MAX_ORIGINAL_SIZE;
+        assert!(matches!(
+            validate_direct_output_layout(&manifest),
+            Err(ExecutableV2Error::UnsupportedDirectOutputLayout)
         ));
     }
 }

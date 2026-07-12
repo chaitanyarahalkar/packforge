@@ -9,7 +9,7 @@ use packforge_runtime_linux_x86_64::hash;
 use packforge_runtime_linux_x86_64::lzma;
 use packforge_runtime_linux_x86_64::v2_format::{
     self, ElfInfo, HEADER_LEN, MANIFEST_HEADER_LEN, MANIFEST_SEGMENT_LEN, MAX_SEGMENTS, Manifest,
-    Segment, TRAILER_LEN,
+    OutputLayout, Segment, TRAILER_LEN,
 };
 
 const MAX_MANIFEST_LENGTH: usize = MANIFEST_HEADER_LEN + MAX_SEGMENTS * MANIFEST_SEGMENT_LEN;
@@ -28,7 +28,6 @@ const AT_FDCWD: isize = -100;
 const O_RDONLY: usize = 0;
 const O_CLOEXEC: usize = 0x80000;
 const SEEK_END: usize = 2;
-const PROT_NONE: usize = 0;
 const PROT_READ: usize = 1;
 const PROT_WRITE: usize = 2;
 const PROT_EXEC: usize = 4;
@@ -179,8 +178,8 @@ unsafe fn run(
 
     let original_length = usize::try_from(header.original_length)
         .map_err(|_| b"packforge: v2 original is too large\n" as &'static [u8])?;
-    let original_mapping = map_writable(original_length)
-        .ok_or(b"packforge: cannot allocate v2 output\n" as &'static [u8])?;
+    let output_layout = v2_format::direct_output_layout(&manifest).map_err(format_error_message)?;
+    let original_mapping = reserve_output(output_layout)?;
     let original = unsafe { slice::from_raw_parts_mut(original_mapping, original_length) };
     let report = lzma::decompress(payload, &header.properties, original)
         .map_err(|_| b"packforge: v2 LZMA1 decompression failed\n" as &'static [u8])?;
@@ -192,13 +191,11 @@ unsafe fn run(
     }
     let elf = v2_format::validate_elf(original, &manifest).map_err(format_error_message)?;
 
-    reserve_segments(&manifest)?;
-    populate_segments(original, &manifest)?;
+    finalize_output(output_layout, &manifest)?;
     unsafe { rewrite_auxiliary_vector(stack, elf) }?;
 
     let _ = syscall1(SYS_CLOSE, self_fd);
     let _ = syscall2(SYS_MUNMAP, payload_mapping as usize, payload_length);
-    let _ = syscall2(SYS_MUNMAP, original_mapping as usize, original_length);
     unsafe { transfer(stack, elf.entry_point as usize, rtld_fini) }
 }
 
@@ -225,76 +222,77 @@ fn verify_file_range(
     result
 }
 
-fn reserve_segments(manifest: &Manifest) -> Result<(), &'static [u8]> {
-    for (index, segment) in manifest.segments.iter().take(manifest.count).enumerate() {
-        let address = usize::try_from(segment.map_start)
+fn reserve_output(layout: OutputLayout) -> Result<*mut u8, &'static [u8]> {
+    let address = usize::try_from(layout.start)
+        .map_err(|_| b"packforge: target mapping is out of range\n" as &'static [u8])?;
+    let length = usize::try_from(layout.length)
+        .map_err(|_| b"packforge: target mapping is out of range\n" as &'static [u8])?;
+    let mapped = syscall6(
+        SYS_MMAP,
+        address,
+        length,
+        PROT_READ | PROT_WRITE,
+        MAP_PRIVATE | MAP_ANONYMOUS | MAP_FIXED_NOREPLACE,
+        usize::MAX,
+        0,
+    );
+    if is_error(mapped) || mapped as usize != address {
+        if !is_error(mapped) {
+            let _ = syscall2(SYS_MUNMAP, mapped as usize, length);
+        }
+        return Err(b"packforge: target address collision\n");
+    }
+    Ok(mapped as *mut u8)
+}
+
+fn finalize_output(layout: OutputLayout, manifest: &Manifest) -> Result<(), &'static [u8]> {
+    for segment in manifest.segments.iter().take(manifest.count) {
+        let zero_start = segment
+            .virtual_address
+            .checked_add(segment.file_size)
+            .ok_or(b"packforge: target address is out of range\n" as &'static [u8])?;
+        let zero_length = usize::try_from(segment.memory_size - segment.file_size)
             .map_err(|_| b"packforge: target mapping is out of range\n" as &'static [u8])?;
-        let length = usize::try_from(segment.map_length)
-            .map_err(|_| b"packforge: target mapping is out of range\n" as &'static [u8])?;
-        let mapped = syscall6(
-            SYS_MMAP,
-            address,
-            length,
-            PROT_NONE,
-            MAP_PRIVATE | MAP_ANONYMOUS | MAP_FIXED_NOREPLACE,
-            usize::MAX,
-            0,
-        );
-        if is_error(mapped) || mapped as usize != address {
-            if !is_error(mapped) {
-                let _ = syscall2(SYS_MUNMAP, mapped as usize, length);
-            }
-            unmap_reserved(manifest, index);
-            return Err(b"packforge: target address collision\n");
+        for index in 0..zero_length {
+            unsafe { ptr::write_volatile((zero_start as *mut u8).add(index), 0) };
         }
     }
-    Ok(())
-}
 
-fn unmap_reserved(manifest: &Manifest, count: usize) {
-    for segment in manifest.segments.iter().take(count) {
-        let _ = syscall2(
-            SYS_MUNMAP,
-            segment.map_start as usize,
-            segment.map_length as usize,
-        );
-    }
-}
-
-fn populate_segments(original: &[u8], manifest: &Manifest) -> Result<(), &'static [u8]> {
-    for segment in manifest.segments.iter().take(manifest.count) {
-        let map_start = usize::try_from(segment.map_start)
-            .map_err(|_| b"packforge: target mapping is out of range\n" as &'static [u8])?;
-        let map_length = usize::try_from(segment.map_length)
-            .map_err(|_| b"packforge: target mapping is out of range\n" as &'static [u8])?;
+    let span_end = layout
+        .start
+        .checked_add(layout.length)
+        .ok_or(b"packforge: target mapping is out of range\n" as &'static [u8])?;
+    let mut cursor = layout.start;
+    for _ in 0..manifest.count {
+        let segment = manifest
+            .segments
+            .iter()
+            .take(manifest.count)
+            .filter(|segment| segment.map_start >= cursor)
+            .min_by_key(|segment| segment.map_start)
+            .ok_or(b"packforge: invalid target mapping order\n" as &'static [u8])?;
+        if segment.map_start > cursor {
+            let _ = syscall2(
+                SYS_MUNMAP,
+                cursor as usize,
+                (segment.map_start - cursor) as usize,
+            );
+        }
         if is_error(syscall3(
             SYS_MPROTECT,
-            map_start,
-            map_length,
-            PROT_READ | PROT_WRITE,
+            segment.map_start as usize,
+            segment.map_length as usize,
+            segment_protection(*segment),
         )) {
-            return Err(b"packforge: cannot make target mapping writable\n");
-        }
-        let source_start = usize::try_from(segment.file_offset)
-            .map_err(|_| b"packforge: target source is out of range\n" as &'static [u8])?;
-        let source_length = usize::try_from(segment.file_size)
-            .map_err(|_| b"packforge: target source is out of range\n" as &'static [u8])?;
-        let source_end = source_start
-            .checked_add(source_length)
-            .ok_or(b"packforge: target source is out of range\n" as &'static [u8])?;
-        let source = original
-            .get(source_start..source_end)
-            .ok_or(b"packforge: target source is out of range\n" as &'static [u8])?;
-        let destination = usize::try_from(segment.virtual_address)
-            .map_err(|_| b"packforge: target address is out of range\n" as &'static [u8])?
-            as *mut u8;
-        for (index, byte) in source.iter().copied().enumerate() {
-            unsafe { ptr::write_volatile(destination.add(index), byte) };
-        }
-        let protection = segment_protection(*segment);
-        if is_error(syscall3(SYS_MPROTECT, map_start, map_length, protection)) {
             return Err(b"packforge: cannot apply target protections\n");
         }
+        cursor = segment
+            .map_start
+            .checked_add(segment.map_length)
+            .ok_or(b"packforge: target mapping is out of range\n" as &'static [u8])?;
+    }
+    if cursor < span_end {
+        let _ = syscall2(SYS_MUNMAP, cursor as usize, (span_end - cursor) as usize);
     }
     Ok(())
 }
