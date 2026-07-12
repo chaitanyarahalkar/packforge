@@ -14,11 +14,11 @@ cc -O2 -Wall -Wextra -Werror -static -no-pie \
 cargo run --release --locked -p packforge-core --example m2_codec4_pack -- \
     "$scratch/original" "$scratch/loader-v2" "$scratch/packed"
 
-original_output="$("$scratch/original")"
-packed_output="$("$scratch/packed")"
+original_output="$(PACKFORGE_SMOKE=ci "$scratch/original" round-trip)"
+packed_output="$(PACKFORGE_SMOKE=ci "$scratch/packed" round-trip)"
 test "$packed_output" = "$original_output"
 
 cargo run --release --locked -p packforge-cli -- verify "$scratch/packed" >/dev/null
 cargo run --release --locked -p packforge-cli -- unpack \
-    "$scratch/packed" "$scratch/unpacked" >/dev/null
+    "$scratch/packed" --output "$scratch/unpacked" >/dev/null
 cmp "$scratch/original" "$scratch/unpacked"
