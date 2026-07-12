@@ -40,6 +40,7 @@ runtime_traces="${PACKFORGE_RUNTIME_TRACES:-}"
 phase_iterations="${PACKFORGE_PHASE_ITERATIONS:-0}"
 codec_spike_output="${PACKFORGE_CODEC_SPIKE_OUTPUT:-}"
 asm_oracle_output="${PACKFORGE_ASM_ORACLE_OUTPUT:-}"
+asm_object_output="${PACKFORGE_ASM_OBJECT_OUTPUT:-}"
 if ! [[ "$phase_iterations" =~ ^[0-9]+$ ]] || \
     (( phase_iterations < 0 || phase_iterations > 21 )); then
     printf 'PACKFORGE_PHASE_ITERATIONS must be from 0 through 21\n' >&2
@@ -106,6 +107,9 @@ if [[ -n "$asm_oracle_output" ]]; then
         "$scratch/LzmaDecOpt.o" -o "$scratch/lzma-asm-oracle"
     asm_object_bytes="$(stat -c %s "$scratch/LzmaDecOpt.o")"
     asm_text_bytes="$(size -A "$scratch/LzmaDecOpt.o" | awk '$1 ~ /^\.text/ { total += $2 } END { print total + 0 }')"
+    if [[ -n "$asm_object_output" ]]; then
+        install -m 0644 "$scratch/LzmaDecOpt.o" "$asm_object_output"
+    fi
 fi
 
 cc -O2 -Wall -Wextra -Werror -static -no-pie \
