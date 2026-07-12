@@ -255,12 +255,18 @@ fn finalize_output(layout: OutputLayout, manifest: &Manifest) -> Result<(), &'st
         if source != segment.virtual_address {
             let length = usize::try_from(segment.file_size)
                 .map_err(|_| b"packforge: target source is out of range\n" as &'static [u8])?;
-            unsafe {
-                relocate(
-                    segment.virtual_address as *mut u8,
-                    source as *const u8,
-                    length,
-                );
+            let destination = segment.virtual_address as *mut u8;
+            let source = source as *const u8;
+            if (destination as usize) <= (source as usize) {
+                for index in 0..length {
+                    let byte = unsafe { ptr::read_volatile(source.add(index)) };
+                    unsafe { ptr::write_volatile(destination.add(index), byte) };
+                }
+            } else {
+                for index in (0..length).rev() {
+                    let byte = unsafe { ptr::read_volatile(source.add(index)) };
+                    unsafe { ptr::write_volatile(destination.add(index), byte) };
+                }
             }
         }
         let zero_start = segment
@@ -452,11 +458,6 @@ const fn is_error(result: isize) -> bool {
 
 #[unsafe(no_mangle)]
 unsafe extern "C" fn memmove(destination: *mut u8, source: *const u8, count: usize) -> *mut u8 {
-    unsafe { relocate(destination, source, count) }
-}
-
-#[inline(never)]
-unsafe fn relocate(destination: *mut u8, source: *const u8, count: usize) -> *mut u8 {
     if (destination as usize) <= (source as usize) {
         for index in 0..count {
             let byte = unsafe { ptr::read_volatile(source.add(index)) };
