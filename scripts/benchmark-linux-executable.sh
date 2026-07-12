@@ -41,6 +41,7 @@ phase_iterations="${PACKFORGE_PHASE_ITERATIONS:-0}"
 codec_spike_output="${PACKFORGE_CODEC_SPIKE_OUTPUT:-}"
 asm_oracle_output="${PACKFORGE_ASM_ORACLE_OUTPUT:-}"
 asm_object_output="${PACKFORGE_ASM_OBJECT_OUTPUT:-}"
+brotli_output="${PACKFORGE_BROTLI_OUTPUT:-}"
 if ! [[ "$phase_iterations" =~ ^[0-9]+$ ]] || \
     (( phase_iterations < 0 || phase_iterations > 21 )); then
     printf 'PACKFORGE_PHASE_ITERATIONS must be from 0 through 21\n' >&2
@@ -62,6 +63,9 @@ if [[ -n "$codec_spike_output" ]]; then
 fi
 if [[ -n "$asm_oracle_output" ]]; then
     printf 'fixture\tonline_cpus\taffinity_cpus\tserial_sum_ns\ttwo_worker_lower_bound_ns\tfour_worker_lower_bound_ns\tpthread_parallel_median_ns\tchunk0_decoded_bytes\tchunk0_compressed_bytes\tchunk0_median_ns\tchunk1_decoded_bytes\tchunk1_compressed_bytes\tchunk1_median_ns\tchunk2_decoded_bytes\tchunk2_compressed_bytes\tchunk2_median_ns\tchunk3_decoded_bytes\tchunk3_compressed_bytes\tchunk3_median_ns\tasm_object_bytes\tasm_text_bytes\n' > "$asm_oracle_output"
+fi
+if [[ -n "$brotli_output" ]]; then
+    printf 'fixture\tpayload_bytes\tmedian_decode_ns\tupx_ceiling_bytes\tmanifest_bytes\tmaximum_complete_loader_bytes\tdecoder_file_bytes\tdecoder_text_bytes\tdecoder_rodata_bytes\tdecoder_linked_lower_bound_bytes\tdecoder_lower_bound_fits\n' > "$brotli_output"
 fi
 
 upx_version="5.2.0"
@@ -115,6 +119,30 @@ if [[ -n "$asm_oracle_output" ]]; then
     if [[ -n "$asm_object_output" ]]; then
         install -m 0644 "$scratch/LzmaDecOpt.o" "$asm_object_output"
     fi
+fi
+if [[ -n "$brotli_output" ]]; then
+    brotli_commit="028fb5a23661f123017c060daa546b55cf4bde29"
+    git clone --quiet --no-checkout https://github.com/google/brotli.git "$scratch/brotli"
+    git -C "$scratch/brotli" checkout --quiet "$brotli_commit"
+    test "$(git -C "$scratch/brotli" rev-parse HEAD)" = "$brotli_commit"
+    cmake -S "$scratch/brotli" -B "$scratch/brotli-build" \
+        -DCMAKE_BUILD_TYPE=MinSizeRel \
+        -DCMAKE_C_FLAGS_MINSIZEREL='-Os -DNDEBUG -ffunction-sections -fdata-sections' \
+        -DBROTLI_BUILD_FOR_PACKAGE=ON -DBROTLI_DISABLE_TESTS=ON >/dev/null
+    cmake --build "$scratch/brotli-build" \
+        --target brotli brotlidec-static brotlicommon-static -j 4 >/dev/null
+    cc -Os -DNDEBUG -Wall -Wextra -Werror -ffunction-sections -fdata-sections \
+        -I"$scratch/brotli/c/include" \
+        "$workspace/scripts/support/brotli_decoder_oracle.c" \
+        "$scratch/brotli-build/libbrotlidec-static.a" \
+        "$scratch/brotli-build/libbrotlicommon-static.a" \
+        -Wl,--gc-sections -lm -o "$scratch/brotli-decoder-oracle"
+    brotli_decoder_file_bytes="$(stat -c %s "$scratch/brotli-decoder-oracle")"
+    brotli_text_bytes="$(size -A "$scratch/brotli-decoder-oracle" | \
+        awk '$1 == ".text" { print $2 + 0 }')"
+    brotli_rodata_bytes="$(size -A "$scratch/brotli-decoder-oracle" | \
+        awk '$1 == ".rodata" { print $2 + 0 }')"
+    brotli_linked_lower_bound="$((brotli_text_bytes + brotli_rodata_bytes))"
 fi
 
 cc -O2 -Wall -Wextra -Werror -static -no-pie \
@@ -247,6 +275,28 @@ for label in hello-c hello-cpp hello-rust hello-go; do
     "$upx" --best --quiet "$upx_packed" >/dev/null
     "$upx" --best --quiet "$upx_second" >/dev/null
     cmp "$upx_packed" "$upx_second"
+
+    if [[ -n "$brotli_output" ]]; then
+        brotli_payload="$scratch/$label.br"
+        "$scratch/brotli-build/brotli" -q 11 -f -o "$brotli_payload" "$original"
+        brotli_payload_bytes="$(stat -c %s "$brotli_payload")"
+        brotli_median="$($scratch/brotli-decoder-oracle \
+            "$brotli_payload" "$original" 21)"
+        brotli_manifest_size="$($packer inspect "$packforge" --json | python3 -c \
+            'import json,sys; print(json.load(sys.stdin)["manifest_size"])')"
+        brotli_upx_ceiling="$(( $(stat -c %s "$upx_packed") * 105 / 100 ))"
+        brotli_maximum_loader="$((brotli_upx_ceiling - brotli_payload_bytes - brotli_manifest_size - 192 - 128))"
+        brotli_fits=false
+        if (( brotli_linked_lower_bound <= brotli_maximum_loader )); then
+            brotli_fits=true
+        fi
+        printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
+            "$label" "$brotli_payload_bytes" "$brotli_median" \
+            "$brotli_upx_ceiling" "$brotli_manifest_size" \
+            "$brotli_maximum_loader" "$brotli_decoder_file_bytes" \
+            "$brotli_text_bytes" "$brotli_rodata_bytes" \
+            "$brotli_linked_lower_bound" "$brotli_fits" >> "$brotli_output"
+    fi
 
     if [[ -n "$codec_spike_output" ]]; then
         baseline_bytes="$(stat -c %s "$packforge")"
