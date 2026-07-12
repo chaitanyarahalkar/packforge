@@ -240,6 +240,7 @@ static void x86_bcj_decode(unsigned char *bytes, size_t length) {
 
 static int affinity_cpu_count(long online_cpus) {
 #if defined(__linux__)
+  (void)online_cpus;
   cpu_set_t affinity;
   CPU_ZERO(&affinity);
   if (sched_getaffinity(0, sizeof(affinity), &affinity) != 0) fail();
