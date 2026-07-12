@@ -5,15 +5,19 @@ use core::arch::{asm, global_asm};
 use core::panic::PanicInfo;
 use core::{ptr, slice};
 
+#[cfg(feature = "lzma-asm")]
+use packforge_runtime_linux_x86_64::bcj;
 use packforge_runtime_linux_x86_64::hash;
 #[cfg(feature = "lzma")]
 use packforge_runtime_linux_x86_64::lzma;
+#[cfg(all(feature = "lzma-asm", not(feature = "lzma-parallel")))]
+use packforge_runtime_linux_x86_64::lzma_asm;
+#[cfg(feature = "lzma-parallel")]
+use packforge_runtime_linux_x86_64::lzma_parallel;
 use packforge_runtime_linux_x86_64::v2_format::{
     self, ElfInfo, HEADER_LEN, MANIFEST_HEADER_LEN, MANIFEST_SEGMENT_LEN, MAX_SEGMENTS, Manifest,
     OutputLayout, Segment, TRAILER_LEN,
 };
-#[cfg(feature = "lzma-asm")]
-use packforge_runtime_linux_x86_64::{bcj, lzma_asm};
 
 const MAX_MANIFEST_LENGTH: usize = MANIFEST_HEADER_LEN + MAX_SEGMENTS * MANIFEST_SEGMENT_LEN;
 
@@ -201,6 +205,11 @@ unsafe fn run(
         v2_format::CODEC_LZMA1_BCJ4 => {
             let chunks = v2_format::parse_codec4_chunks(payload, original_length)
                 .map_err(format_error_message)?;
+            #[cfg(feature = "lzma-parallel")]
+            lzma_parallel::decompress(payload, original, header.properties, chunks).map_err(
+                |_| b"packforge: parallel codec-4 decompression failed\n" as &'static [u8],
+            )?;
+            #[cfg(not(feature = "lzma-parallel"))]
             for chunk in chunks {
                 let compressed_end = chunk
                     .compressed_offset
@@ -220,12 +229,12 @@ unsafe fn run(
                     header.properties,
                     chunk.trailing_bytes,
                 )
-                .map_err(|()| {
+                .map_err(|_| {
                     b"packforge: codec-4 LZMA1 decompression failed\n" as &'static [u8]
                 })?;
             }
             bcj::decode(original)
-                .map_err(|()| b"packforge: codec-4 BCJ decode failed\n" as &'static [u8])?;
+                .map_err(|_| b"packforge: codec-4 BCJ decode failed\n" as &'static [u8])?;
         }
         _ => return Err(b"packforge: unsupported v2 codec\n"),
     }

@@ -11,6 +11,7 @@ packforge-runtime-hash = { path = "../../crates/packforge-runtime-hash", feature
 [features]
 lzma = ["dep:packforge-lzma-decoder"]
 lzma-asm = []
+lzma-parallel = ["lzma-asm"]
 optimized-hash = ["dep:packforge-runtime-hash"]
 optimized = []
 runtime-v2 = []

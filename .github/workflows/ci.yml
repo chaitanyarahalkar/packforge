@@ -41,6 +41,7 @@ jobs:
         run: |
           bash scripts/check-lzma-asm-object.sh
           bash scripts/ci-codec4-asm-smoke.sh
+          PACKFORGE_CODEC4_DECODER=parallel bash scripts/ci-codec4-asm-smoke.sh
       - name: Runtime Clippy
         working-directory: runtime/linux-x86_64
         run: |

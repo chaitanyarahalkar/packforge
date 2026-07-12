@@ -3,7 +3,10 @@
 const ALLOWED: [bool; 8] = [true, true, true, false, true, false, false, false];
 const BIT_NUMBER: [usize; 8] = [0, 1, 2, 2, 3, 3, 3, 3];
 
-pub fn decode(bytes: &mut [u8]) -> Result<(), ()> {
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct DecodeError;
+
+pub fn decode(bytes: &mut [u8]) -> Result<(), DecodeError> {
     if bytes.len() <= 4 {
         return Ok(());
     }
@@ -36,16 +39,19 @@ pub fn decode(bytes: &mut [u8]) -> Result<(), ()> {
             let mut source = u32::from_le_bytes(
                 bytes[position + 1..position + 5]
                     .try_into()
-                    .map_err(|_| ())?,
+                    .map_err(|_| DecodeError)?,
             );
             let mut destination;
             loop {
-                let program_counter = u32::try_from(position).map_err(|_| ())?.wrapping_add(5);
+                let program_counter = u32::try_from(position)
+                    .map_err(|_| DecodeError)?
+                    .wrapping_add(5);
                 destination = source.wrapping_sub(program_counter);
                 if previous_mask == 0 {
                     break;
                 }
-                let shift = u32::try_from(BIT_NUMBER[previous_mask] * 8).map_err(|_| ())?;
+                let shift =
+                    u32::try_from(BIT_NUMBER[previous_mask] * 8).map_err(|_| DecodeError)?;
                 let byte = (destination >> (24 - shift)).to_le_bytes()[0];
                 if !matches!(byte, 0 | 0xff) {
                     break;

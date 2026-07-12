@@ -14,6 +14,8 @@ pub mod lz4;
 pub mod lzma;
 #[cfg(feature = "lzma-asm")]
 pub mod lzma_asm;
+#[cfg(feature = "lzma-parallel")]
+pub mod lzma_parallel;
 pub mod procfd;
 #[cfg(any(feature = "lzma", feature = "lzma-asm"))]
 pub mod v2_format;

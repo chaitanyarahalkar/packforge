@@ -11,6 +11,9 @@ const INITIAL_PROBABILITY: u16 = 1024;
 const BAD_INITIAL_CODE: u32 = 0xbfff_fc00;
 const MAX_MATCH_REMAINDER: u32 = 273;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct DecodeError;
+
 #[repr(C)]
 struct Properties {
     lc: u8,
@@ -69,18 +72,18 @@ pub fn decompress(
     output: &mut [u8],
     properties: [u8; 5],
     expected_trailing: u8,
-) -> Result<(), ()> {
+) -> Result<(), DecodeError> {
     if input.len() < 5
         || output.is_empty()
         || input[0] != 0
         || properties[0] != 0x5d
         || expected_trailing > 5
     {
-        return Err(());
+        return Err(DecodeError);
     }
     let code = u32::from_be_bytes([input[1], input[2], input[3], input[4]]);
     if code >= BAD_INITIAL_CODE {
-        return Err(());
+        return Err(DecodeError);
     }
     let dictionary_size =
         u32::from_le_bytes([properties[1], properties[2], properties[3], properties[4]]);
@@ -127,11 +130,11 @@ pub fn decompress(
         || decoder.state >= 12
         || decoder.remaining_length > MAX_MATCH_REMAINDER
         || consumed < 0
-        || usize::try_from(consumed).ok().is_none_or(|used| {
-            used > input.len() || input.len() - used != usize::from(expected_trailing)
-        })
+        || usize::try_from(consumed)
+            .ok()
+            .is_none_or(|used| used > input.len() || input.len() - used > 5)
     {
-        return Err(());
+        return Err(DecodeError);
     }
     Ok(())
 }
