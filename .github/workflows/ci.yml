@@ -54,6 +54,8 @@ jobs:
         run: cargo clippy --bin packforge-runtime-linux-x86-64 --target x86_64-unknown-linux-musl --locked -- -D warnings
       - name: Reproducible runtime artifact
         run: bash scripts/build-runtime.sh --check
+      - name: Reproducible runtime v2 artifact
+        run: bash scripts/build-runtime-v2.sh --check
       - name: LZMA size feasibility gate
         run: bash scripts/ci-lzma-spike.sh
       - name: Static ELF round trip

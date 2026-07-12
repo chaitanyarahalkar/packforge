@@ -40,6 +40,12 @@ const MIN_DICTIONARY_SIZE: u32 = 1 << 12;
 const MAX_DICTIONARY_SIZE: u32 = 1 << 26;
 const FIXED_LZMA_PROPERTIES: u8 = 0x5d;
 
+/// Reproducible fail-closed `ET_DYN` artifact used while direct mapping is built.
+pub const LINUX_X86_64_RUNTIME_V2: &[u8] = include_bytes!(concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/../../runtime/artifacts/linux-x86_64/loader-v2"
+));
+
 /// Stable metadata returned for an experimental executable v2 artifact.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct ExecutableV2Info {
@@ -713,7 +719,7 @@ mod tests {
         EXECUTABLE_V2_HEADER_LEN, ExecutableV2Error, PackOptions, Profile, Verification,
         inspect_executable_v2, pack_executable_v2, unpack_executable_v2, verify_executable_v2,
     };
-    use crate::LINUX_X86_64_RUNTIME;
+    use crate::LINUX_X86_64_RUNTIME_V2;
 
     fn fixture() -> Vec<u8> {
         let mut bytes = vec![0u8; 16_384];
@@ -748,7 +754,7 @@ mod tests {
                 profile: Profile::Balanced,
                 allow_larger: true,
             },
-            LINUX_X86_64_RUNTIME,
+            LINUX_X86_64_RUNTIME_V2,
         )
         .unwrap()
     }
@@ -774,7 +780,7 @@ mod tests {
     #[test]
     fn rejects_header_manifest_payload_and_trailer_corruption() {
         let packed = packed();
-        let loader_length = LINUX_X86_64_RUNTIME.len();
+        let loader_length = LINUX_X86_64_RUNTIME_V2.len();
 
         let mut header = packed.bytes.clone();
         header[loader_length + 16] ^= 1;

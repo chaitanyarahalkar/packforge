@@ -17,6 +17,13 @@ path = "src/main.rs"
 test = false
 bench = false
 
+[[bin]]
+name = "packforge-runtime-v2-linux-x86-64"
+path = "src/v2.rs"
+required-features = ["lzma"]
+test = false
+bench = false
+
 [workspace]
 
 [dev-dependencies]
