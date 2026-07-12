@@ -29,7 +29,6 @@ pub(super) fn encode(
 ) -> Result<Vec<u8>, ExecutableV2Error> {
     let mut transformed = original.to_vec();
     x86_bcj(&mut transformed, true)?;
-    let boundaries = candidate_boundaries(transformed.len());
     let maximum_chunk = transformed
         .len()
         .checked_mul(MAX_CHUNK_PERCENT)
@@ -37,36 +36,25 @@ pub(super) fn encode(
         .map(|value| value / 100)
         .ok_or(ExecutableV2Error::InvalidRange)?;
     let mut cache = BTreeMap::<(usize, usize), (Vec<u8>, u8)>::new();
-    let mut best: Option<(usize, usize, [usize; 3])> = None;
-
-    for &first in &boundaries[0] {
-        for &second in &boundaries[1] {
-            for &third in &boundaries[2] {
-                let split = [0, first, second, third, transformed.len()];
-                if split
-                    .windows(2)
-                    .any(|range| range[0] >= range[1] || range[1] - range[0] > maximum_chunk)
-                {
-                    continue;
-                }
-                let mut total = CHUNK_TABLE_LEN;
-                let mut maximum_encoded = 0usize;
-                for range in split.windows(2) {
-                    let (encoded, _) =
-                        encoded_chunk(&mut cache, &transformed, range[0], range[1], properties)?;
-                    total = total
-                        .checked_add(encoded.len())
-                        .ok_or(ExecutableV2Error::InvalidRange)?;
-                    maximum_encoded = maximum_encoded.max(encoded.len());
-                }
-                let score = (total, maximum_encoded, [first, second, third]);
-                if best.as_ref().is_none_or(|current| score < *current) {
-                    best = Some(score);
-                }
-            }
-        }
-    }
-
+    let coarse = candidate_boundaries(transformed.len());
+    let best = evaluate_boundaries(
+        &coarse,
+        &mut cache,
+        &transformed,
+        properties,
+        maximum_chunk,
+        None,
+    )?;
+    let coarse_selected = best.ok_or(ExecutableV2Error::InvalidRange)?.2;
+    let refined = refined_boundaries(coarse_selected, transformed.len());
+    let best = evaluate_boundaries(
+        &refined,
+        &mut cache,
+        &transformed,
+        properties,
+        maximum_chunk,
+        best,
+    )?;
     let (_, _, selected) = best.ok_or(ExecutableV2Error::InvalidRange)?;
     let split = [0, selected[0], selected[1], selected[2], transformed.len()];
     let mut payload = vec![0u8; CHUNK_TABLE_LEN];
@@ -160,6 +148,52 @@ fn candidate_boundaries(length: usize) -> [Vec<usize>; 3] {
             .map(|percent| length * percent / 100)
             .collect()
     })
+}
+
+fn refined_boundaries(selected: [usize; 3], length: usize) -> [Vec<usize>; 3] {
+    selected.map(|center| {
+        let start = center.saturating_sub(4096);
+        let end = center.saturating_add(4096).min(length.saturating_sub(1));
+        (start..=end).step_by(1024).collect()
+    })
+}
+
+fn evaluate_boundaries(
+    boundaries: &[Vec<usize>; 3],
+    cache: &mut BTreeMap<(usize, usize), (Vec<u8>, u8)>,
+    transformed: &[u8],
+    properties: &lzma_sdk_rs::LzmaProps,
+    maximum_chunk: usize,
+    mut best: Option<(usize, usize, [usize; 3])>,
+) -> Result<Option<(usize, usize, [usize; 3])>, ExecutableV2Error> {
+    for &first in &boundaries[0] {
+        for &second in &boundaries[1] {
+            for &third in &boundaries[2] {
+                let split = [0, first, second, third, transformed.len()];
+                if split
+                    .windows(2)
+                    .any(|range| range[0] >= range[1] || range[1] - range[0] > maximum_chunk)
+                {
+                    continue;
+                }
+                let mut total = CHUNK_TABLE_LEN;
+                let mut maximum_encoded = 0usize;
+                for range in split.windows(2) {
+                    let (encoded, _) =
+                        encoded_chunk(cache, transformed, range[0], range[1], properties)?;
+                    total = total
+                        .checked_add(encoded.len())
+                        .ok_or(ExecutableV2Error::InvalidRange)?;
+                    maximum_encoded = maximum_encoded.max(encoded.len());
+                }
+                let score = (total, maximum_encoded, [first, second, third]);
+                if best.as_ref().is_none_or(|current| score < *current) {
+                    best = Some(score);
+                }
+            }
+        }
+    }
+    Ok(best)
 }
 
 fn encode_entry(output: &mut [u8], entry: ChunkEntry) -> Result<(), ExecutableV2Error> {

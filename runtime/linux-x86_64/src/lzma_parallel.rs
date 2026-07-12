@@ -14,7 +14,7 @@ const STACK_MAPPING_LENGTH: usize = 3 * STACK_STRIDE;
 const PROT_NONE: usize = 0;
 const PROT_READ_WRITE: usize = 3;
 const MAP_PRIVATE_ANONYMOUS: usize = 0x22;
-const FUTEX_WAIT_PRIVATE: usize = 128;
+const FUTEX_WAIT: usize = 0;
 const SYS_MMAP: usize = 9;
 const SYS_MPROTECT: usize = 10;
 const SYS_MUNMAP: usize = 11;
@@ -42,9 +42,11 @@ packforge_clone_worker:
     test %rax, %rax
     jnz .Lclone_parent
     pop %rdi
+    mov %rdi, %rbx
     xor %rbp, %rbp
     call packforge_worker_entry
-    mov %eax, %edi
+    mov %eax, 40(%rbx)
+    xor %edi, %edi
     mov $60, %eax
     syscall
     ud2
@@ -67,8 +69,6 @@ struct Worker {
     status: AtomicI32,
     exit_tid: AtomicI32,
 }
-
-unsafe impl Sync for Worker {}
 
 pub fn decompress(
     payload: &[u8],
@@ -144,14 +144,11 @@ unsafe extern "C" fn packforge_worker_entry(worker: *mut Worker) -> i32 {
     let worker = unsafe { &*worker };
     let input = unsafe { slice::from_raw_parts(worker.input, worker.input_length) };
     let output = unsafe { slice::from_raw_parts_mut(worker.output, worker.output_length) };
-    let status =
-        if lzma_asm::decompress(input, output, worker.properties, worker.trailing_bytes).is_ok() {
-            1
-        } else {
-            -1
-        };
-    worker.status.store(status, Ordering::Release);
-    0
+    if lzma_asm::decompress(input, output, worker.properties, worker.trailing_bytes).is_ok() {
+        1
+    } else {
+        -1
+    }
 }
 
 fn map_stacks() -> Result<*mut u8, DecodeError> {
@@ -187,7 +184,7 @@ fn wait_for_exit(exit_tid: &AtomicI32) {
         let _ = syscall6(
             SYS_FUTEX,
             exit_tid.as_ptr() as usize,
-            FUTEX_WAIT_PRIVATE,
+            FUTEX_WAIT,
             expected as usize,
             0,
             0,

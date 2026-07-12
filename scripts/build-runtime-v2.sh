@@ -90,7 +90,7 @@ sysroot="$("$rustc_bin" --print sysroot)"
 host="$("$rustc_bin" -vV | awk '/^host:/ {print $2}')"
 objcopy="$sysroot/lib/rustlib/$host/bin/llvm-objcopy"
 
-rustflags="-C linker-flavor=ld.lld -C link-self-contained=no -C link-arg=-nostdlib -C link-arg=-static -C link-arg=-pie -C link-arg=--no-dynamic-linker -C link-arg=-Bsymbolic -C link-arg=--gc-sections -C link-arg=--sort-section=name -C link-arg=--no-eh-frame-hdr -C link-arg=-z -C link-arg=noexecstack -C relocation-model=$relocation_model -C force-unwind-tables=no"
+rustflags="-C linker-flavor=ld.lld -C link-self-contained=no -C link-arg=-nostdlib -C link-arg=-static -C link-arg=-pie -C link-arg=--no-dynamic-linker -C link-arg=-Bsymbolic -C link-arg=--gc-sections -C link-arg=--icf=all -C link-arg=--sort-section=name -C link-arg=--no-eh-frame-hdr -C link-arg=-z -C link-arg=noexecstack -C relocation-model=$relocation_model -C force-unwind-tables=no"
 if [[ "$decoder_implementation" == "asm" || "$decoder_implementation" == "parallel" ]]; then
   asm_object="$target_dir/LzmaDecOpt.o"
   mkdir -p "$target_dir"
