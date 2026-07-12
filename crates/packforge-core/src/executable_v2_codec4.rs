@@ -45,6 +45,7 @@ pub(super) fn encode(
         maximum_chunk,
         None,
     )?;
+    let best = refine_boundaries(best, &mut cache, &transformed, properties, maximum_chunk)?;
     let (_, _, selected) = best.ok_or(ExecutableV2Error::InvalidRange)?;
     let split = [0, selected[0], selected[1], selected[2], transformed.len()];
     let mut payload = vec![0u8; CHUNK_TABLE_LEN];
@@ -173,6 +174,35 @@ fn evaluate_boundaries(
                     best = Some(score);
                 }
             }
+        }
+    }
+    Ok(best)
+}
+
+fn refine_boundaries(
+    mut best: Option<(usize, usize, [usize; 3])>,
+    cache: &mut BTreeMap<(usize, usize), (Vec<u8>, u8)>,
+    transformed: &[u8],
+    properties: &lzma_sdk_rs::LzmaProps,
+    maximum_chunk: usize,
+) -> Result<Option<(usize, usize, [usize; 3])>, ExecutableV2Error> {
+    for _ in 0..2 {
+        for index in 0..3 {
+            let selected = best.ok_or(ExecutableV2Error::InvalidRange)?.2;
+            let mut boundaries = selected.map(|boundary| vec![boundary]);
+            let start = selected[index].saturating_sub(8192);
+            let end = selected[index]
+                .saturating_add(8192)
+                .min(transformed.len().saturating_sub(1));
+            boundaries[index] = (start..=end).step_by(256).collect();
+            best = evaluate_boundaries(
+                &boundaries,
+                cache,
+                transformed,
+                properties,
+                maximum_chunk,
+                best,
+            )?;
         }
     }
     Ok(best)

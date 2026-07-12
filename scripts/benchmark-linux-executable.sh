@@ -272,15 +272,18 @@ for label in hello-c hello-cpp hello-rust hello-go; do
             python3 -c 'import json,sys; value=json.load(open(sys.argv[1])); print(value["loader_size"], value["manifest_size"], value["payload_size"], value["original_size"])' \
                 "$inspect_json"
         )
-        dd if="$packforge" of="$scratch/$label.properties" bs=1 \
-            skip="$((loader_size + 20))" count=5 status=none
-        dd if="$packforge" of="$scratch/$label.payload" bs=1 \
-            skip="$((loader_size + 192 + manifest_size))" count="$payload_size" status=none
-        oracle_median="$($scratch/lzma-asm-oracle \
-            "$scratch/$label.payload" "$scratch/$label.properties" "$original" \
-            "$original_size" 21)"
-        printf '%s\t%s\t%s\t%s\n' "$label" "$oracle_median" \
-            "$asm_object_bytes" "$asm_text_bytes" >> "$asm_oracle_output"
+        codec_tag="$(od -An -tu2 -j "$((loader_size + 12))" -N 2 "$packforge" | tr -d ' ')"
+        if [[ "$codec_tag" == "3" ]]; then
+            dd if="$packforge" of="$scratch/$label.properties" bs=1 \
+                skip="$((loader_size + 20))" count=5 status=none
+            dd if="$packforge" of="$scratch/$label.payload" bs=1 \
+                skip="$((loader_size + 192 + manifest_size))" count="$payload_size" status=none
+            oracle_median="$($scratch/lzma-asm-oracle \
+                "$scratch/$label.payload" "$scratch/$label.properties" "$original" \
+                "$original_size" 21)"
+            printf '%s\t%s\t%s\t%s\n' "$label" "$oracle_median" \
+                "$asm_object_bytes" "$asm_text_bytes" >> "$asm_oracle_output"
+        fi
     fi
 
     capture_behavior "$original" "$scratch/original-behavior"

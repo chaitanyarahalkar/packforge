@@ -3,7 +3,51 @@
 use core::arch::{asm, global_asm};
 use core::mem::{offset_of, size_of};
 
-global_asm!(".hidden LzmaDec_DecodeReal_3");
+global_asm!(
+    r#"
+    .hidden LzmaDec_DecodeReal_3
+    .hidden packforge_lzma_finish_remaining
+    .global packforge_lzma_finish_remaining
+    .type packforge_lzma_finish_remaining,@function
+packforge_lzma_finish_remaining:
+    mov 40(%rdi), %rax
+    cmp %rsi, %rax
+    jae .Lrem_ok
+    mov 92(%rdi), %ecx
+    test %ecx, %ecx
+    jz .Lrem_ok
+    cmp $273, %ecx
+    ja .Lrem_error
+    mov 72(%rdi), %edx
+    test %edx, %edx
+    jz .Lrem_error
+    cmp %rdx, %rax
+    jb .Lrem_error
+    mov 24(%rdi), %r8
+.Lrem_loop:
+    mov %rax, %r9
+    sub %rdx, %r9
+    mov (%r8,%r9), %r10b
+    mov %r10b, (%r8,%rax)
+    inc %rax
+    dec %ecx
+    cmp %rsi, %rax
+    jae .Lrem_done
+    test %ecx, %ecx
+    jnz .Lrem_loop
+.Lrem_done:
+    mov %rax, 40(%rdi)
+    mov %ecx, 92(%rdi)
+.Lrem_ok:
+    xor %eax, %eax
+    ret
+.Lrem_error:
+    mov $1, %eax
+    ret
+    .size packforge_lzma_finish_remaining, .-packforge_lzma_finish_remaining
+"#,
+    options(att_syntax)
+);
 
 const PROBABILITY_COUNT: usize = 1984 + (0x300 << 3);
 const PROBABILITY_START: usize = 1664;
@@ -12,7 +56,7 @@ const BAD_INITIAL_CODE: u32 = 0xbfff_fc00;
 const MAX_MATCH_REMAINDER: u32 = 273;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct DecodeError(pub u8);
+pub struct DecodeError;
 
 #[repr(C)]
 struct Properties {
@@ -79,11 +123,11 @@ pub fn decompress(
         || properties[0] != 0x5d
         || expected_trailing > 5
     {
-        return Err(DecodeError(1));
+        return Err(DecodeError);
     }
     let code = u32::from_be_bytes([input[1], input[2], input[3], input[4]]);
     if code >= BAD_INITIAL_CODE {
-        return Err(DecodeError(2));
+        return Err(DecodeError);
     }
     let dictionary_size =
         u32::from_le_bytes([properties[1], properties[2], properties[3], properties[4]]);
@@ -116,7 +160,7 @@ pub fn decompress(
     let result =
         unsafe { decode_real(&mut decoder, output.len(), input.as_ptr().add(input.len())) };
     if result != 0 {
-        return Err(DecodeError(3));
+        return Err(DecodeError);
     }
     finish_remaining(&mut decoder, output.len())?;
     if decoder.dictionary_position < output.len() && decoder.remaining_length == 0 {
@@ -124,44 +168,38 @@ pub fn decompress(
         decoder.input = padding.as_ptr();
         let result = unsafe { decode_real(&mut decoder, output.len(), padding.as_ptr().add(1)) };
         if result != 0 {
-            return Err(DecodeError(3));
+            return Err(DecodeError);
         }
         finish_remaining(&mut decoder, output.len())?;
     }
     if decoder.dictionary_position != output.len() {
-        return Err(DecodeError(4));
+        return Err(DecodeError);
     }
     if decoder.state >= 12 {
-        return Err(DecodeError(5));
+        return Err(DecodeError);
     }
     if decoder.remaining_length > MAX_MATCH_REMAINDER {
-        return Err(DecodeError(6));
+        return Err(DecodeError);
     }
     Ok(())
 }
 
 fn finish_remaining(decoder: &mut Decoder, output_limit: usize) -> Result<(), DecodeError> {
-    if decoder.dictionary_position < output_limit && decoder.remaining_length != 0 {
-        if decoder.remaining_length > MAX_MATCH_REMAINDER {
-            return Err(DecodeError(6));
-        }
-        let distance = decoder.repetitions[0] as usize;
-        if distance == 0 || distance > decoder.dictionary_position {
-            return Err(DecodeError(3));
-        }
-        let mut position = decoder.dictionary_position;
-        let mut remaining = decoder.remaining_length;
-        while position < output_limit && remaining != 0 {
-            unsafe {
-                *decoder.dictionary.add(position) = *decoder.dictionary.add(position - distance);
-            }
-            position += 1;
-            remaining -= 1;
-        }
-        decoder.dictionary_position = position;
-        decoder.remaining_length = remaining;
+    let result: i32;
+    unsafe {
+        asm!(
+            "call packforge_lzma_finish_remaining",
+            in("rdi") decoder,
+            in("rsi") output_limit,
+            lateout("eax") result,
+            clobber_abi("C"),
+        );
     }
-    Ok(())
+    if result == 0 {
+        Ok(())
+    } else {
+        Err(DecodeError)
+    }
 }
 
 #[inline(never)]

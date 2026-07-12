@@ -9,7 +9,7 @@ mode="${1:---check}"
 opt_level="${PACKFORGE_RUNTIME_V2_OPT_LEVEL:-z}"
 relocation_model="${PACKFORGE_RUNTIME_V2_RELOCATION_MODEL:-pic}"
 decoder_opt_level="${PACKFORGE_RUNTIME_V2_DECODER_OPT_LEVEL-3}"
-decoder_implementation="${PACKFORGE_RUNTIME_V2_DECODER:-asm}"
+decoder_implementation="${PACKFORGE_RUNTIME_V2_DECODER:-parallel}"
 hash_implementation="${PACKFORGE_RUNTIME_V2_HASH:-compact-opt2}"
 
 case "$mode" in

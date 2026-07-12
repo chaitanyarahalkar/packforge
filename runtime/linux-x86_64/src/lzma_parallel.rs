@@ -65,7 +65,6 @@ struct Worker {
     output_length: usize,
     properties: [u8; 5],
     trailing_bytes: u8,
-    padding: [u8; 2],
     status: AtomicI32,
     exit_tid: AtomicI32,
 }
@@ -86,13 +85,12 @@ pub fn decompress(
             output_length: chunk.decoded_length,
             properties,
             trailing_bytes: chunk.trailing_bytes,
-            padding: [0; 2],
             status: AtomicI32::new(0),
-            exit_tid: AtomicI32::new(-1),
+            exit_tid: AtomicI32::new(0),
         }
     });
-    let mut created = 0usize;
     for (index, worker) in workers.iter_mut().enumerate() {
+        worker.exit_tid.store(-1, Ordering::Release);
         let stack_top = unsafe { stack_mapping.add((index + 1) * STACK_STRIDE) };
         let result = unsafe { spawn(stack_top, worker, &mut worker.exit_tid) };
         if result < 0 {
@@ -100,7 +98,6 @@ pub fn decompress(
             worker.exit_tid.store(0, Ordering::Release);
             break;
         }
-        created += 1;
     }
 
     let main = chunks[0];
@@ -110,13 +107,12 @@ pub fn decompress(
         properties,
         main.trailing_bytes,
     );
-    for worker in workers.iter().take(created) {
+    for worker in &workers {
         wait_for_exit(&worker.exit_tid);
     }
-    let workers_ok = created == workers.len()
-        && workers
-            .iter()
-            .all(|worker| worker.status.load(Ordering::Acquire) == 1);
+    let workers_ok = workers
+        .iter()
+        .all(|worker| worker.status.load(Ordering::Acquire) == 1);
     let _ = syscall2(SYS_MUNMAP, stack_mapping as usize, STACK_MAPPING_LENGTH);
     if main_result.is_err() || !workers_ok {
         return Err(DecodeError);
@@ -230,5 +226,5 @@ fn syscall6(
 }
 
 const fn is_error(value: isize) -> bool {
-    value < 0 && value >= -4095
+    value < 0
 }
