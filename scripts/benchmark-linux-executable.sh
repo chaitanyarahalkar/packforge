@@ -38,6 +38,7 @@ packer="$target_dir/release/packforge"
 raw_samples="${PACKFORGE_BENCHMARK_RAW:-}"
 runtime_traces="${PACKFORGE_RUNTIME_TRACES:-}"
 phase_iterations="${PACKFORGE_PHASE_ITERATIONS:-0}"
+codec_spike_output="${PACKFORGE_CODEC_SPIKE_OUTPUT:-}"
 if ! [[ "$phase_iterations" =~ ^[0-9]+$ ]] || \
     (( phase_iterations < 0 || phase_iterations > 21 )); then
     printf 'PACKFORGE_PHASE_ITERATIONS must be from 0 through 21\n' >&2
@@ -52,6 +53,10 @@ if [[ -n "$runtime_traces" ]]; then
         exit 2
     fi
     mkdir -p "$runtime_traces"
+fi
+if [[ -n "$codec_spike_output" ]]; then
+    printf 'fixture\tstreams\tpayload_bytes\tprojected_bytes\tupx_ceiling_bytes\tpasses_size\n' \
+        > "$codec_spike_output"
 fi
 
 upx_version="5.2.0"
@@ -71,6 +76,10 @@ test "$("$upx" --version | head -1)" = "upx $upx_version"
 
 "$workspace/scripts/build-runtime-v2.sh" --check >/dev/null
 cargo build --release --locked -p packforge-cli >/dev/null
+if [[ -n "$codec_spike_output" ]]; then
+    cargo build --release --locked -p packforge-core --example m2_codec_spike >/dev/null
+    codec_spike="$target_dir/release/examples/m2_codec_spike"
+fi
 
 cc -O2 -Wall -Wextra -Werror -static -no-pie \
     "$workspace/tests/fixtures/hello-static.c" -o "$scratch/hello-c"
@@ -202,6 +211,25 @@ for label in hello-c hello-cpp hello-rust hello-go; do
     "$upx" --best --quiet "$upx_packed" >/dev/null
     "$upx" --best --quiet "$upx_second" >/dev/null
     cmp "$upx_packed" "$upx_second"
+
+    if [[ -n "$codec_spike_output" ]]; then
+        baseline_bytes="$(stat -c %s "$packforge")"
+        baseline_payload="$($packer inspect "$packforge" --json | python3 -c \
+            'import json,sys; print(json.load(sys.stdin)["payload_size"])')"
+        upx_bytes="$(stat -c %s "$upx_packed")"
+        upx_ceiling="$((upx_bytes * 105 / 100))"
+        "$codec_spike" "$original" | tail -n +2 | \
+            while IFS=$'\t' read -r streams _ payload_bytes _; do
+                projected="$((baseline_bytes - baseline_payload + payload_bytes + 768 + streams * 32))"
+                passes=false
+                if (( projected <= upx_ceiling )); then
+                    passes=true
+                fi
+                printf '%s\t%s\t%s\t%s\t%s\t%s\n' \
+                    "$label" "$streams" "$payload_bytes" "$projected" \
+                    "$upx_ceiling" "$passes" >> "$codec_spike_output"
+            done
+    fi
 
     capture_behavior "$original" "$scratch/original-behavior"
     capture_behavior "$packforge" "$scratch/packforge-behavior"
