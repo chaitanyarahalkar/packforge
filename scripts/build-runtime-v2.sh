@@ -125,8 +125,12 @@ if [[ -n "$decoder_opt_level" ]]; then
   if [[ "$decoder_opt_level" == "z" || "$decoder_opt_level" == "s" ]]; then
     decoder_opt_value="\"$decoder_opt_level\""
   fi
+  decoder_package="packforge-lzma-decoder"
+  if [[ "$decoder_implementation" == "apultra-bcj2" ]]; then
+    decoder_package="packforge-codec5-decoder"
+  fi
   cargo_arguments=(
-    --config "profile.release.package.packforge-lzma-decoder.opt-level=$decoder_opt_value"
+    --config "profile.release.package.$decoder_package.opt-level=$decoder_opt_value"
     "${cargo_arguments[@]}"
   )
 fi

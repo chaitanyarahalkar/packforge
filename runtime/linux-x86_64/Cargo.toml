@@ -6,13 +6,14 @@ publish = false
 
 [dependencies]
 packforge-lzma-decoder = { path = "../../crates/packforge-lzma-decoder", optional = true }
+packforge-codec5-decoder = { path = "../../crates/packforge-codec5-decoder", optional = true }
 packforge-runtime-hash = { path = "../../crates/packforge-runtime-hash", features = ["lzma", "optimized"], optional = true }
 
 [features]
 lzma = ["dep:packforge-lzma-decoder"]
 lzma-asm = []
 lzma-parallel = ["lzma-asm"]
-apultra-bcj2 = []
+apultra-bcj2 = ["dep:packforge-codec5-decoder"]
 optimized-hash = ["dep:packforge-runtime-hash"]
 optimized = []
 runtime-v2 = []

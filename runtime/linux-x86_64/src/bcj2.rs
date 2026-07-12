@@ -1,4 +1,4 @@
-//! Checked, allocation-free one-shot BCJ2 decoder.
+// Checked, allocation-free one-shot BCJ2 decoder.
 
 const TOP_VALUE: u32 = 1 << 24;
 const BIT_MODEL_TOTAL: u32 = 1 << 11;
@@ -16,6 +16,11 @@ pub enum Error {
 /// Reconstructs one exact runtime image from canonical BCJ2 streams.
 ///
 /// `jump` is the four-plane transposed representation used by codec 5.
+///
+/// # Errors
+///
+/// Returns [`Error`] for invalid stream sizes, range-coder framing, output
+/// mismatch, truncated side streams, or unconsumed input.
 pub fn decode(
     main: &[u8],
     call: &[u8],
@@ -78,10 +83,8 @@ pub fn decode(
         }
         let probability_index = if byte == 0xe8 {
             usize::from(context) + 2
-        } else if byte == 0xe9 {
-            1
         } else {
-            0
+            usize::from(byte == 0xe9)
         };
         let probability = u32::from(probabilities[probability_index]);
         let bound = (range >> 11) * probability;

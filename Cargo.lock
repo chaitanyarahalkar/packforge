@@ -278,6 +278,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "packforge-codec5-decoder"
+version = "0.1.0"
+dependencies = [
+ "packforge-codec5-sys",
+]
+
+[[package]]
 name = "packforge-codec5-sys"
 version = "0.1.0"
 dependencies = [

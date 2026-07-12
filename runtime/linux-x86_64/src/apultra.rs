@@ -1,4 +1,4 @@
-//! Checked, allocation-free decoder for the APultra byte-stream format.
+// Checked, allocation-free decoder for the APultra byte-stream format.
 
 const MIN_MATCH3_OFFSET: usize = 1280;
 const MIN_MATCH4_OFFSET: usize = 32_000;
@@ -61,34 +61,12 @@ impl<'a> Bits<'a> {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use packforge_codec5_sys::apultra_compress_bytes;
-
-    use super::{Error, decompress};
-
-    #[test]
-    fn matches_pinned_apultra_encoder_and_rejects_corruption() {
-        let original: std::vec::Vec<u8> = (0u8..=u8::MAX)
-            .cycle()
-            .take(65_537)
-            .map(|value| value.wrapping_mul(17).wrapping_add(3))
-            .collect();
-        let compressed = apultra_compress_bytes(&original).unwrap();
-        let mut decoded = std::vec![0u8; original.len()];
-        decompress(&compressed, &mut decoded).unwrap();
-        assert_eq!(decoded, original);
-
-        let mut truncated = compressed;
-        truncated.pop();
-        assert!(matches!(
-            decompress(&truncated, &mut decoded),
-            Err(Error::Input | Error::Output | Error::Trailing)
-        ));
-    }
-}
-
-/// Decodes one exact APultra stream into `output`.
+/// Decodes one exact `APultra` stream into `output`.
+///
+/// # Errors
+///
+/// Returns [`Error`] for truncated input, invalid distances, arithmetic
+/// overflow, output-length mismatch, or noncanonical trailing bytes.
 pub fn decompress(input: &[u8], output: &mut [u8]) -> Result<(), Error> {
     if input.is_empty() || output.is_empty() {
         return Err(Error::Input);
@@ -187,4 +165,31 @@ fn copy_match(
         *position += 1;
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use packforge_codec5_sys::apultra_compress_bytes;
+
+    use super::{Error, decompress};
+
+    #[test]
+    fn matches_pinned_apultra_encoder_and_rejects_corruption() {
+        let original: std::vec::Vec<u8> = (0u8..=u8::MAX)
+            .cycle()
+            .take(65_537)
+            .map(|value| value.wrapping_mul(17).wrapping_add(3))
+            .collect();
+        let compressed = apultra_compress_bytes(&original).unwrap();
+        let mut decoded = std::vec![0u8; original.len()];
+        decompress(&compressed, &mut decoded).unwrap();
+        assert_eq!(decoded, original);
+
+        let mut truncated = compressed;
+        truncated.pop();
+        assert!(matches!(
+            decompress(&truncated, &mut decoded),
+            Err(Error::Input | Error::Output | Error::Trailing)
+        ));
+    }
 }

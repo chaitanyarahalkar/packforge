@@ -11,7 +11,7 @@ cargo-fuzz = true
 blake3 = "1.8.5"
 libfuzzer-sys = "0.4"
 packforge-core = { path = "../crates/packforge-core" }
-packforge-runtime-linux-x86-64 = { path = "../runtime/linux-x86_64", features = ["lzma"] }
+packforge-runtime-linux-x86-64 = { path = "../runtime/linux-x86_64", features = ["apultra-bcj2", "lzma"] }
 
 [[bin]]
 name = "artifact_parsers"
@@ -44,6 +44,20 @@ bench = false
 [[bin]]
 name = "runtime_hash"
 path = "fuzz_targets/runtime_hash.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "runtime_apultra"
+path = "fuzz_targets/runtime_apultra.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "runtime_bcj2"
+path = "fuzz_targets/runtime_bcj2.rs"
 test = false
 doc = false
 bench = false
