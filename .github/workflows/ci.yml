@@ -36,9 +36,9 @@ jobs:
         run: cargo check --manifest-path fuzz/Cargo.toml --locked
       - name: Runtime decoder and digest tests
         working-directory: runtime/linux-x86_64
-        run: |
-          cargo test --target x86_64-unknown-linux-gnu --features apultra-bcj2 --locked
-          cargo test --manifest-path ../../crates/packforge-codec5-decoder/Cargo.toml --locked
+        run: cargo test --target x86_64-unknown-linux-gnu --features apultra-bcj2 --locked
+      - name: Codec 5 decoder differential tests
+        run: cargo test -p packforge-codec5-decoder --locked
       - name: Codec 4 serial assembly smoke
         run: |
           bash scripts/check-lzma-asm-object.sh
