@@ -134,11 +134,14 @@ fn parent_output(left: [u32; 8], right: [u32; 8]) -> Output {
 }
 
 fn words_from_block(block: &[u8]) -> [u32; 16] {
-    let mut padded = [0u8; BLOCK_LEN];
-    padded[..block.len()].copy_from_slice(block);
     let mut words = [0u32; 16];
-    for (word, bytes) in words.iter_mut().zip(padded.chunks_exact(4)) {
-        *word = u32::from_le_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]);
+    for (word_index, word) in words.iter_mut().enumerate() {
+        let byte_index = word_index * 4;
+        let mut bytes = [0u8; 4];
+        for (offset, byte) in bytes.iter_mut().enumerate() {
+            *byte = block.get(byte_index + offset).copied().unwrap_or(0);
+        }
+        *word = u32::from_le_bytes(bytes);
     }
     words
 }

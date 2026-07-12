@@ -51,7 +51,11 @@ jobs:
         run: cargo test --target x86_64-unknown-linux-gnu --locked
       - name: Runtime Clippy
         working-directory: runtime/linux-x86_64
-        run: cargo clippy --bin packforge-runtime-linux-x86-64 --target x86_64-unknown-linux-musl --locked -- -D warnings
+        run: |
+          cargo clippy --bin packforge-runtime-linux-x86-64 \
+            --target x86_64-unknown-linux-musl --locked -- -D warnings
+          cargo clippy --bin packforge-runtime-v2-linux-x86-64 \
+            --target x86_64-unknown-linux-musl --features lzma --locked -- -D warnings
       - name: Reproducible runtime artifact
         run: bash scripts/build-runtime.sh --check
       - name: Reproducible runtime v2 artifact

@@ -25,7 +25,7 @@ if [[ "$target_dir" != /* ]]; then
 fi
 packer="$target_dir/release/packforge"
 
-"$workspace/scripts/build-runtime.sh" --check
+"$workspace/scripts/build-runtime-v2.sh" --check
 
 cc -O2 -Wall -Wextra -Werror -static -no-pie \
     "$workspace/tests/fixtures/hello-static.c" -o "$c_original"
@@ -116,6 +116,15 @@ test "$original_signal_status" -eq "$packed_signal_status"
 test "$packed_signal_status" -eq 143
 printf 'runtime semantics: cwd, fd, output, effects, status, signal passed\n'
 
+if command -v strace >/dev/null 2>&1; then
+    PACKFORGE_SMOKE=ci strace -f -qq -o "$scratch/direct-load.strace" \
+        -e trace=execve,execveat,memfd_create,openat,pread64,mmap,mprotect \
+        "$c_packed" round-trip >/dev/null
+    test "$(grep -c 'execve(' "$scratch/direct-load.strace")" -eq 1
+    ! grep -Eq 'execveat\(|memfd_create\(' "$scratch/direct-load.strace"
+    printf 'runtime trace: one execve, no memfd_create or execveat passed\n'
+fi
+
 file "$c_packed"
 readelf -h -l "$c_packed"
 
@@ -129,12 +138,14 @@ failure_output="$("$corrupt_trailer" round-trip 2>&1)"
 failure_status="$?"
 set -e
 test "$failure_status" -eq 127
-test "$failure_output" = "packforge: executable trailer integrity failed"
+test "$failure_output" = "packforge: v2 metadata integrity failed"
 
 cp "$c_packed" "$corrupt_payload"
 loader_size="$(stat -c %s \
-    "$workspace/runtime/artifacts/linux-x86_64/loader-v1")"
-payload_offset="$((loader_size + 192))"
+    "$workspace/runtime/artifacts/linux-x86_64/loader-v2")"
+manifest_size="$("$packer" inspect "$c_packed" --json | \
+    python3 -c 'import json,sys; print(json.load(sys.stdin)["manifest_size"])')"
+payload_offset="$((loader_size + 192 + manifest_size))"
 printf '\200' | dd of="$corrupt_payload" bs=1 seek="$payload_offset" \
     conv=notrunc status=none
 set +e
@@ -142,6 +153,6 @@ failure_output="$("$corrupt_payload" round-trip 2>&1)"
 failure_status="$?"
 set -e
 test "$failure_status" -eq 127
-test "$failure_output" = "packforge: payload integrity check failed"
+test "$failure_output" = "packforge: v2 payload integrity failed"
 
 printf 'native executable differential smoke passed\n'

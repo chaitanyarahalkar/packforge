@@ -107,9 +107,10 @@ fn cli_self_contained_executable_round_trips_without_execution() {
     );
     let report: serde_json::Value = serde_json::from_slice(&packed.stdout).unwrap();
     assert_eq!(report["artifact_kind"], "executable");
-    assert_eq!(report["executable_version"], 1);
-    assert_eq!(report["runtime_abi_version"], 1);
-    assert_eq!(report["container"]["profile"], "fast");
+    assert_eq!(report["executable_version"], 2);
+    assert_eq!(report["runtime_abi_version"], 2);
+    assert_eq!(report["manifest"]["segments"].as_array().unwrap().len(), 1);
+    assert!(report["manifest_size"].as_u64().unwrap() > 0);
 
     let inspected = packforge(&["inspect", executable.to_str().unwrap(), "--json"]);
     assert!(inspected.status.success());
