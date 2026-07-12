@@ -61,7 +61,7 @@ if [[ -n "$codec_spike_output" ]]; then
         > "$codec_spike_output"
 fi
 if [[ -n "$asm_oracle_output" ]]; then
-    printf 'fixture\tmedian_ns\tasm_object_bytes\tasm_text_bytes\n' > "$asm_oracle_output"
+    printf 'fixture\tonline_cpus\taffinity_cpus\tserial_sum_ns\ttwo_worker_lower_bound_ns\tfour_worker_lower_bound_ns\tpthread_parallel_median_ns\tchunk0_decoded_bytes\tchunk0_compressed_bytes\tchunk0_median_ns\tchunk1_decoded_bytes\tchunk1_compressed_bytes\tchunk1_median_ns\tchunk2_decoded_bytes\tchunk2_compressed_bytes\tchunk2_median_ns\tchunk3_decoded_bytes\tchunk3_compressed_bytes\tchunk3_median_ns\tasm_object_bytes\tasm_text_bytes\n' > "$asm_oracle_output"
 fi
 
 upx_version="5.2.0"
@@ -105,6 +105,11 @@ if [[ -n "$asm_oracle_output" ]]; then
         "$workspace/scripts/support/lzma_asm_oracle.c" \
         "$scratch/7zip/C/LzmaDec.c" "$scratch/7zip/C/Alloc.c" \
         "$scratch/LzmaDecOpt.o" -o "$scratch/lzma-asm-oracle"
+    cc -O3 -DNDEBUG -DZ7_LZMA_DEC_OPT -Wall -Wextra -Werror -pthread \
+        -I"$scratch/7zip/C" \
+        "$workspace/scripts/support/lzma_codec4_asm_oracle.c" \
+        "$scratch/7zip/C/LzmaDec.c" "$scratch/7zip/C/Alloc.c" \
+        "$scratch/LzmaDecOpt.o" -o "$scratch/lzma-codec4-asm-oracle"
     asm_object_bytes="$(stat -c %s "$scratch/LzmaDecOpt.o")"
     asm_text_bytes="$(size -A "$scratch/LzmaDecOpt.o" | awk '$1 ~ /^\.text/ { total += $2 } END { print total + 0 }')"
     if [[ -n "$asm_object_output" ]]; then
@@ -273,15 +278,15 @@ for label in hello-c hello-cpp hello-rust hello-go; do
                 "$inspect_json"
         )
         codec_tag="$(od -An -tu2 -j "$((loader_size + 12))" -N 2 "$packforge" | tr -d ' ')"
-        if [[ "$codec_tag" == "3" ]]; then
+        if [[ "$codec_tag" == "4" ]]; then
             dd if="$packforge" of="$scratch/$label.properties" bs=1 \
                 skip="$((loader_size + 20))" count=5 status=none
             dd if="$packforge" of="$scratch/$label.payload" bs=1 \
                 skip="$((loader_size + 192 + manifest_size))" count="$payload_size" status=none
-            oracle_median="$($scratch/lzma-asm-oracle \
+            oracle_diagnostic="$($scratch/lzma-codec4-asm-oracle \
                 "$scratch/$label.payload" "$scratch/$label.properties" "$original" \
                 "$original_size" 21)"
-            printf '%s\t%s\t%s\t%s\n' "$label" "$oracle_median" \
+            printf '%s\t%s\t%s\t%s\n' "$label" "$oracle_diagnostic" \
                 "$asm_object_bytes" "$asm_text_bytes" >> "$asm_oracle_output"
         fi
     fi
