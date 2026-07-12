@@ -45,16 +45,6 @@ pub(super) fn encode(
         maximum_chunk,
         None,
     )?;
-    let coarse_selected = best.ok_or(ExecutableV2Error::InvalidRange)?.2;
-    let refined = refined_boundaries(coarse_selected, transformed.len());
-    let best = evaluate_boundaries(
-        &refined,
-        &mut cache,
-        &transformed,
-        properties,
-        maximum_chunk,
-        best,
-    )?;
     let (_, _, selected) = best.ok_or(ExecutableV2Error::InvalidRange)?;
     let split = [0, selected[0], selected[1], selected[2], transformed.len()];
     let mut payload = vec![0u8; CHUNK_TABLE_LEN];
@@ -147,14 +137,6 @@ fn candidate_boundaries(length: usize) -> [Vec<usize>; 3] {
         ((center - 3)..=(center + 3))
             .map(|percent| length * percent / 100)
             .collect()
-    })
-}
-
-fn refined_boundaries(selected: [usize; 3], length: usize) -> [Vec<usize>; 3] {
-    selected.map(|center| {
-        let start = center.saturating_sub(4096);
-        let end = center.saturating_add(4096).min(length.saturating_sub(1));
-        (start..=end).step_by(1024).collect()
     })
 }
 

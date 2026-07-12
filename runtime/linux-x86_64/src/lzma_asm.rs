@@ -119,7 +119,9 @@ pub fn decompress(
             "call LzmaDec_DecodeReal_3",
             in("rdi") &mut decoder,
             in("rsi") output.len(),
-            in("rdx") input.as_ptr().add(input.len()),
+            in("rdx") input
+                .as_ptr()
+                .add(input.len() - usize::from(expected_trailing)),
             lateout("eax") result,
             clobber_abi("C"),
         );
@@ -130,9 +132,9 @@ pub fn decompress(
         || decoder.state >= 12
         || decoder.remaining_length > MAX_MATCH_REMAINDER
         || consumed < 0
-        || usize::try_from(consumed)
-            .ok()
-            .is_none_or(|used| used > input.len() || input.len() - used > 5)
+        || usize::try_from(consumed).ok().is_none_or(|used| {
+            used > input.len() || input.len() - used > usize::from(expected_trailing)
+        })
     {
         return Err(DecodeError);
     }
