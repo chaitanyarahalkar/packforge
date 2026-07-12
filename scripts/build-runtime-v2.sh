@@ -8,7 +8,7 @@ opt_level="${PACKFORGE_RUNTIME_V2_OPT_LEVEL:-z}"
 relocation_model="${PACKFORGE_RUNTIME_V2_RELOCATION_MODEL:-pic}"
 decoder_opt_level="${PACKFORGE_RUNTIME_V2_DECODER_OPT_LEVEL-3}"
 decoder_implementation="${PACKFORGE_RUNTIME_V2_DECODER:-parallel}"
-hash_implementation="${PACKFORGE_RUNTIME_V2_HASH:-compact-opt2}"
+hash_implementation="${PACKFORGE_RUNTIME_V2_HASH:-compact-four-optz}"
 artifact_name="loader-v2"
 size_limit=23500
 if [[ "$decoder_implementation" == "apultra-bcj2" ]]; then
@@ -55,8 +55,9 @@ fi
 case "$hash_implementation" in
   compact) runtime_features=lzma ;;
   compact-optz | compact-opt1 | compact-opt2) runtime_features=lzma,optimized-hash ;;
+  compact-four-optz) runtime_features=lzma,four-lane-hash ;;
   *)
-    printf 'PACKFORGE_RUNTIME_V2_HASH must be compact, compact-optz, compact-opt1, or compact-opt2\n' >&2
+    printf 'PACKFORGE_RUNTIME_V2_HASH must be compact, compact-optz, compact-opt1, compact-opt2, or compact-four-optz\n' >&2
     exit 2
     ;;
 esac
@@ -134,8 +135,8 @@ if [[ -n "$decoder_opt_level" ]]; then
     "${cargo_arguments[@]}"
   )
 fi
-if [[ "$hash_implementation" == compact-opt* ]]; then
-  hash_opt_level="${hash_implementation#compact-opt}"
+if [[ "$hash_implementation" == compact-opt* || "$hash_implementation" == compact-four-opt* ]]; then
+  hash_opt_level="${hash_implementation##*opt}"
   if [[ "$hash_opt_level" == "z" ]]; then
     hash_opt_level='"z"'
   fi

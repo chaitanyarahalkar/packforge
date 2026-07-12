@@ -73,6 +73,28 @@ pub fn hash(input: &[u8]) -> [u8; 32] {
     let mut cv_stack = [[0u32; 8]; 54];
     let mut stack_len = 0usize;
 
+    #[cfg(all(feature = "four-lane", target_arch = "x86_64"))]
+    {
+        let mut chunk_index = 0usize;
+        while chunk_index + 4 <= last_chunk {
+            for cv in chunk_chaining_values4(input, chunk_index) {
+                push_cv(&mut cv_stack, &mut stack_len, chunk_index, cv);
+                chunk_index += 1;
+            }
+        }
+        while chunk_index < last_chunk {
+            let start = chunk_index * CHUNK_LEN;
+            let output = chunk_output(&input[start..start + CHUNK_LEN], chunk_index as u64);
+            push_cv(
+                &mut cv_stack,
+                &mut stack_len,
+                chunk_index,
+                output.chaining_value(),
+            );
+            chunk_index += 1;
+        }
+    }
+    #[cfg(not(all(feature = "four-lane", target_arch = "x86_64")))]
     for chunk_index in 0..last_chunk {
         let start = chunk_index * CHUNK_LEN;
         let output = chunk_output(&input[start..start + CHUNK_LEN], chunk_index as u64);
@@ -94,6 +116,23 @@ pub fn hash(input: &[u8]) -> [u8; 32] {
         output = parent_output(cv_stack[stack_len], output.chaining_value());
     }
     output.root_hash()
+}
+
+#[cfg(all(feature = "four-lane", target_arch = "x86_64"))]
+fn push_cv(
+    cv_stack: &mut [[u32; 8]; 54],
+    stack_len: &mut usize,
+    chunk_index: usize,
+    mut cv: [u32; 8],
+) {
+    let mut total_chunks = chunk_index + 1;
+    while total_chunks & 1 == 0 {
+        *stack_len -= 1;
+        cv = parent_output(cv_stack[*stack_len], cv).chaining_value();
+        total_chunks >>= 1;
+    }
+    cv_stack[*stack_len] = cv;
+    *stack_len += 1;
 }
 
 fn chunk_output(chunk: &[u8], chunk_counter: u64) -> Output {
@@ -186,6 +225,34 @@ fn compress(
         state[index + 8] ^= chaining_value[index];
     }
     state
+}
+
+#[cfg(all(feature = "four-lane", target_arch = "x86_64"))]
+fn chunk_chaining_values4(input: &[u8], first_chunk: usize) -> [[u32; 8]; 4] {
+    let mut chaining_values = [IV; 4];
+    for block_index in 0..CHUNK_LEN / BLOCK_LEN {
+        let mut block_words = [[0u32; 16]; 4];
+        for (lane, words) in block_words.iter_mut().enumerate() {
+            let start = (first_chunk + lane) * CHUNK_LEN + block_index * BLOCK_LEN;
+            *words = words_from_block(&input[start..start + BLOCK_LEN]);
+        }
+        let flags = (if block_index == 0 { CHUNK_START } else { 0 })
+            | if block_index + 1 == CHUNK_LEN / BLOCK_LEN {
+                CHUNK_END
+            } else {
+                0
+            };
+        chaining_values = packforge_runtime_hash_x86::compress4(
+            chaining_values,
+            block_words,
+            first_chunk as u64,
+            BLOCK_LEN as u32,
+            flags,
+            IV,
+            &MSG_SCHEDULE,
+        );
+    }
+    chaining_values
 }
 
 fn round(state: &mut [u32; 16], message: &[u32; 16], schedule: &[u8; 16]) {

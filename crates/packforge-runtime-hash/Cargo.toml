@@ -10,6 +10,10 @@ publish = false
 [features]
 lzma = []
 optimized = []
+four-lane = ["optimized", "dep:packforge-runtime-hash-x86"]
+
+[dependencies]
+packforge-runtime-hash-x86 = { path = "../packforge-runtime-hash-x86", optional = true }
 
 [dev-dependencies]
 blake3 = { version = "1.8.5", features = ["pure"] }

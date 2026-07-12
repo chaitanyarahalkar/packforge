@@ -318,7 +318,12 @@ name = "packforge-runtime-hash"
 version = "0.1.0"
 dependencies = [
  "blake3",
+ "packforge-runtime-hash-x86",
 ]
+
+[[package]]
+name = "packforge-runtime-hash-x86"
+version = "0.1.0"
 
 [[package]]
 name = "pkg-config"

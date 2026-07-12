@@ -101,6 +101,13 @@ version = "0.1.0"
 [[package]]
 name = "packforge-runtime-hash"
 version = "0.1.0"
+dependencies = [
+ "packforge-runtime-hash-x86",
+]
+
+[[package]]
+name = "packforge-runtime-hash-x86"
+version = "0.1.0"
 
 [[package]]
 name = "packforge-runtime-linux-x86-64"

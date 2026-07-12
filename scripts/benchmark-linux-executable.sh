@@ -43,9 +43,14 @@ asm_oracle_output="${PACKFORGE_ASM_ORACLE_OUTPUT:-}"
 asm_object_output="${PACKFORGE_ASM_OBJECT_OUTPUT:-}"
 brotli_output="${PACKFORGE_BROTLI_OUTPUT:-}"
 apultra_bcj2_output="${PACKFORGE_APULTRA_BCJ2_OUTPUT:-}"
+force_codec4="${PACKFORGE_BENCHMARK_CODEC4:-0}"
 if ! [[ "$phase_iterations" =~ ^[0-9]+$ ]] || \
     (( phase_iterations < 0 || phase_iterations > 21 )); then
     printf 'PACKFORGE_PHASE_ITERATIONS must be from 0 through 21\n' >&2
+    exit 2
+fi
+if [[ "$force_codec4" != "0" && "$force_codec4" != "1" ]]; then
+    printf 'PACKFORGE_BENCHMARK_CODEC4 must be 0 or 1\n' >&2
     exit 2
 fi
 if [[ -n "$raw_samples" ]]; then
@@ -89,6 +94,10 @@ test "$("$upx" --version | head -1)" = "upx $upx_version"
 
 "$workspace/scripts/build-runtime-v2.sh" --check >/dev/null
 cargo build --release --locked -p packforge-cli >/dev/null
+if [[ "$force_codec4" == "1" ]]; then
+    cargo build --release --locked -p packforge-core --example m2_codec4_pack >/dev/null
+    codec4_packer="$target_dir/release/examples/m2_codec4_pack"
+fi
 if [[ -n "$codec_spike_output" ]]; then
     cargo build --release --locked -p packforge-core --example m2_codec_spike >/dev/null
     codec_spike="$target_dir/release/examples/m2_codec_spike"
@@ -307,10 +316,17 @@ for label in hello-c hello-cpp hello-rust hello-go; do
     upx_packed="$scratch/$label.upx"
     upx_second="$scratch/$label.upx-second"
 
-    "$packer" pack "$original" --output "$packforge" --artifact executable \
-        --profile balanced --json >/dev/null
-    "$packer" pack "$original" --output "$packforge_second" --artifact executable \
-        --profile balanced --json >/dev/null
+    if [[ "$force_codec4" == "1" ]]; then
+        "$codec4_packer" "$original" \
+            "$workspace/runtime/artifacts/linux-x86_64/loader-v2" "$packforge"
+        "$codec4_packer" "$original" \
+            "$workspace/runtime/artifacts/linux-x86_64/loader-v2" "$packforge_second"
+    else
+        "$packer" pack "$original" --output "$packforge" --artifact executable \
+            --profile balanced --json >/dev/null
+        "$packer" pack "$original" --output "$packforge_second" --artifact executable \
+            --profile balanced --json >/dev/null
+    fi
     cmp "$packforge" "$packforge_second"
     "$packer" unpack "$packforge" --output "$restored" --json >/dev/null
     cmp "$original" "$restored"

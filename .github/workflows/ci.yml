@@ -39,6 +39,8 @@ jobs:
         run: cargo test --target x86_64-unknown-linux-gnu --features apultra-bcj2 --locked
       - name: Codec 5 decoder differential tests
         run: cargo test -p packforge-codec5-decoder --locked
+      - name: Four-lane hash differential tests
+        run: cargo test -p packforge-runtime-hash --all-features --locked
       - name: Codec 4 serial assembly smoke
         run: |
           bash scripts/check-lzma-asm-object.sh
@@ -185,6 +187,7 @@ jobs:
           PACKFORGE_ASM_OBJECT_OUTPUT: benchmark-output/LzmaDecOpt.o
           PACKFORGE_BROTLI_OUTPUT: benchmark-output/m2-brotli.tsv
           PACKFORGE_APULTRA_BCJ2_OUTPUT: benchmark-output/m2-apultra-bcj2.tsv
+          PACKFORGE_BENCHMARK_CODEC4: "1"
           PACKFORGE_PHASE_ITERATIONS: "7"
           PACKFORGE_DROP_CACHES: "1"
         run: |
