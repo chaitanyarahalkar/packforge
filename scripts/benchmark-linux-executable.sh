@@ -42,6 +42,7 @@ codec_spike_output="${PACKFORGE_CODEC_SPIKE_OUTPUT:-}"
 asm_oracle_output="${PACKFORGE_ASM_ORACLE_OUTPUT:-}"
 asm_object_output="${PACKFORGE_ASM_OBJECT_OUTPUT:-}"
 brotli_output="${PACKFORGE_BROTLI_OUTPUT:-}"
+apultra_bcj2_output="${PACKFORGE_APULTRA_BCJ2_OUTPUT:-}"
 if ! [[ "$phase_iterations" =~ ^[0-9]+$ ]] || \
     (( phase_iterations < 0 || phase_iterations > 21 )); then
     printf 'PACKFORGE_PHASE_ITERATIONS must be from 0 through 21\n' >&2
@@ -66,6 +67,9 @@ if [[ -n "$asm_oracle_output" ]]; then
 fi
 if [[ -n "$brotli_output" ]]; then
     printf 'fixture\tpayload_bytes\tmedian_decode_ns\tupx_ceiling_bytes\tmanifest_bytes\tmaximum_complete_loader_bytes\tdecoder_file_bytes\tdecoder_text_bytes\tdecoder_rodata_bytes\tdecoder_linked_lower_bound_bytes\tdecoder_lower_bound_fits\n' > "$brotli_output"
+fi
+if [[ -n "$apultra_bcj2_output" ]]; then
+    printf 'fixture\truntime_image_bytes\trecovery_tail_bytes\tpayload_bytes\tmedian_decode_ns\tupx_bytes\tupx_ceiling_bytes\tmaximum_loader_for_upx_bytes\tmaximum_loader_for_105_percent_bytes\tbare_loader_bytes\toracle_text_bytes\toracle_rodata_bytes\tlinked_loader_lower_bound_bytes\tprojected_bytes\n' > "$apultra_bcj2_output"
 fi
 
 upx_version="5.2.0"
@@ -143,6 +147,46 @@ if [[ -n "$brotli_output" ]]; then
     brotli_rodata_bytes="$(size -A "$scratch/brotli-decoder-oracle" | \
         awk '$1 == ".rodata" { print $2 + 0 }')"
     brotli_linked_lower_bound="$((brotli_text_bytes + brotli_rodata_bytes))"
+fi
+if [[ -n "$apultra_bcj2_output" ]]; then
+    if [[ ! -d "$scratch/7zip" ]]; then
+        seven_zip_commit="f9d78aff31a5f2521ae7ddbdc97c4a8855808959"
+        git clone --quiet --no-checkout https://github.com/ip7z/7zip.git "$scratch/7zip"
+        git -C "$scratch/7zip" checkout --quiet "$seven_zip_commit"
+        test "$(git -C "$scratch/7zip" rev-parse HEAD)" = "$seven_zip_commit"
+    fi
+    apultra_commit="8f340057d7402c10da3d9c76c599f9ab83b8a22d"
+    git clone --quiet --no-checkout https://github.com/emmanuel-marty/apultra.git \
+        "$scratch/apultra"
+    git -C "$scratch/apultra" checkout --quiet "$apultra_commit"
+    test "$(git -C "$scratch/apultra" rev-parse HEAD)" = "$apultra_commit"
+    make -C "$scratch/apultra" -s all
+    cc -O2 -Wall -Wextra -Werror -I"$scratch/7zip/C" \
+        "$workspace/scripts/support/bcj2_filter.c" \
+        "$scratch/7zip/C/Bcj2Enc.c" "$scratch/7zip/C/Bcj2.c" \
+        -o "$scratch/bcj2-filter"
+    cc -O2 -Wall -Wextra -Werror \
+        "$workspace/scripts/support/be32_delta_filter.c" \
+        -o "$scratch/be32-filter"
+    cc -Os -DNDEBUG -Wall -Wextra -Werror -Wno-unused-parameter \
+        -ffunction-sections -fdata-sections \
+        -I"$scratch/7zip/C" -I"$scratch/apultra/src" \
+        -I"$scratch/apultra/src/libdivsufsort/include" \
+        "$workspace/scripts/support/apultra_bcj2_oracle.c" \
+        "$scratch/apultra/src/expand.c" "$scratch/7zip/C/Bcj2.c" \
+        -Wl,--gc-sections -o "$scratch/apultra-bcj2-oracle"
+    apultra_oracle_text_bytes="$(size -A "$scratch/apultra-bcj2-oracle" | \
+        awk '$1 == ".text" { print $2 + 0 }')"
+    apultra_oracle_rodata_bytes="$(size -A "$scratch/apultra-bcj2-oracle" | \
+        awk '$1 == ".rodata" { print $2 + 0 }')"
+    cargo build --release --locked -p packforge-core --example m2_lzma_encode >/dev/null
+    apultra_lzma_encoder="$target_dir/release/examples/m2_lzma_encode"
+    PACKFORGE_RUNTIME_V2_DECODER=none \
+        PACKFORGE_RUNTIME_V2_DECODER_OPT_LEVEL= \
+        PACKFORGE_RUNTIME_V2_OUTPUT="$scratch/loader-v2-bare" \
+        "$workspace/scripts/build-runtime-v2.sh" --candidate >/dev/null
+    apultra_bare_loader_bytes="$(stat -c %s "$scratch/loader-v2-bare")"
+    apultra_linked_loader_lower_bound="$((apultra_bare_loader_bytes + apultra_oracle_text_bytes + apultra_oracle_rodata_bytes))"
 fi
 
 cc -O2 -Wall -Wextra -Werror -static -no-pie \
@@ -275,6 +319,59 @@ for label in hello-c hello-cpp hello-rust hello-go; do
     "$upx" --best --quiet "$upx_packed" >/dev/null
     "$upx" --best --quiet "$upx_second" >/dev/null
     cmp "$upx_packed" "$upx_second"
+
+    if [[ -n "$apultra_bcj2_output" ]]; then
+        apultra_inspect="$scratch/$label.apultra-inspect.json"
+        "$packer" inspect "$packforge" --json > "$apultra_inspect"
+        apultra_runtime_length="$(python3 -c \
+            'import json,sys; value=json.load(open(sys.argv[1])); print(max(item["file_offset"] + item["file_size"] for item in value["manifest"]["segments"]))' \
+            "$apultra_inspect")"
+        apultra_original_length="$(stat -c %s "$original")"
+        apultra_tail_length="$((apultra_original_length - apultra_runtime_length))"
+        apultra_runtime="$scratch/$label.apultra-runtime"
+        apultra_tail="$scratch/$label.apultra-tail"
+        dd if="$original" of="$apultra_runtime" bs=1 count="$apultra_runtime_length" status=none
+        dd if="$original" of="$apultra_tail" bs=1 skip="$apultra_runtime_length" status=none
+        apultra_prefix="$scratch/$label.apultra-bcj2"
+        "$scratch/bcj2-filter" split "$apultra_runtime" "$apultra_prefix"
+        "$scratch/be32-filter" t "$apultra_prefix.jump" "$apultra_prefix.jump.transpose"
+        "$scratch/apultra/apultra" "$apultra_prefix.main" "$apultra_prefix.main.apu" >/dev/null
+        "$scratch/apultra/apultra" "$apultra_prefix.call" "$apultra_prefix.call.apu" >/dev/null
+        "$scratch/apultra/apultra" "$apultra_prefix.jump.transpose" \
+            "$apultra_prefix.jump.transpose.apu" >/dev/null
+        apultra_tail_bytes=0
+        apultra_table_bytes=128
+        if (( apultra_tail_length > 0 )); then
+            "$apultra_lzma_encoder" "$apultra_tail" "$apultra_tail.lzma" \
+                "$apultra_original_length"
+            apultra_tail_bytes="$(stat -c %s "$apultra_tail.lzma")"
+            apultra_table_bytes=160
+        fi
+        apultra_payload_bytes="$(($apultra_table_bytes + \
+            $(stat -c %s "$apultra_prefix.main.apu") + \
+            $(stat -c %s "$apultra_prefix.call.apu") + \
+            $(stat -c %s "$apultra_prefix.jump.transpose.apu") + \
+            $(stat -c %s "$apultra_prefix.rc") + apultra_tail_bytes))"
+        apultra_median="$($scratch/apultra-bcj2-oracle \
+            "$apultra_runtime" "$apultra_prefix" 21)"
+        apultra_manifest_size="$(python3 -c \
+            'import json,sys; print(json.load(open(sys.argv[1]))["manifest_size"])' \
+            "$apultra_inspect")"
+        apultra_upx_bytes="$(stat -c %s "$upx_packed")"
+        apultra_upx_ceiling="$((apultra_upx_bytes * 105 / 100))"
+        apultra_fixed_bytes="$((192 + apultra_manifest_size + 128))"
+        apultra_loader_for_upx="$((apultra_upx_bytes - apultra_payload_bytes - apultra_fixed_bytes - 1))"
+        apultra_loader_for_ceiling="$((apultra_upx_ceiling - apultra_payload_bytes - apultra_fixed_bytes))"
+        apultra_projected_bytes="$((apultra_payload_bytes + apultra_fixed_bytes + apultra_linked_loader_lower_bound))"
+        printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
+            "$label" "$apultra_runtime_length" "$apultra_tail_length" \
+            "$apultra_payload_bytes" "$apultra_median" "$apultra_upx_bytes" \
+            "$apultra_upx_ceiling" "$apultra_loader_for_upx" \
+            "$apultra_loader_for_ceiling" "$apultra_bare_loader_bytes" \
+            "$apultra_oracle_text_bytes" "$apultra_oracle_rodata_bytes" \
+            "$apultra_linked_loader_lower_bound" "$apultra_projected_bytes" \
+            >> "$apultra_bcj2_output"
+    fi
 
     if [[ -n "$brotli_output" ]]; then
         brotli_payload="$scratch/$label.br"

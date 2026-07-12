@@ -57,11 +57,12 @@ esac
 runtime_features="runtime-v2,$runtime_features"
 
 case "$decoder_implementation" in
+  none) runtime_features="${runtime_features/lzma,/}" ;;
   rust) ;;
   asm) runtime_features="${runtime_features/lzma/lzma-asm}" ;;
   parallel) runtime_features="${runtime_features/lzma/lzma-parallel}" ;;
   *)
-    printf 'PACKFORGE_RUNTIME_V2_DECODER must be rust, asm, or parallel\n' >&2
+    printf 'PACKFORGE_RUNTIME_V2_DECODER must be none, rust, asm, or parallel\n' >&2
     exit 2
     ;;
 esac
