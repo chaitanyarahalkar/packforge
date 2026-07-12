@@ -4,6 +4,9 @@ version = "0.1.0"
 edition = "2024"
 publish = false
 
+[features]
+lzma-size-spike = []
+
 [[bin]]
 name = "packforge-runtime-linux-x86-64"
 path = "src/main.rs"
@@ -15,6 +18,7 @@ bench = false
 [dev-dependencies]
 blake3 = { version = "1.8.5", features = ["pure"] }
 lz4_flex = { version = "0.13.1", default-features = false, features = ["safe-encode", "std"] }
+lzma-sdk-rs = "0.2301.1"
 
 [profile.dev]
 panic = "abort"

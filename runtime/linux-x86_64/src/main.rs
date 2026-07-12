@@ -88,6 +88,18 @@ struct Header {
 
 #[unsafe(no_mangle)]
 unsafe extern "C" fn runtime_main(stack: *const usize) -> ! {
+    #[cfg(feature = "lzma-size-spike")]
+    {
+        let decoder: fn(
+            &[u8],
+            &[u8; 5],
+            &mut [u8],
+        ) -> Result<
+            packforge_runtime_linux_x86_64::lzma::DecodeReport,
+            packforge_runtime_linux_x86_64::lzma::DecodeError,
+        > = packforge_runtime_linux_x86_64::lzma::decompress;
+        core::hint::black_box(decoder);
+    }
     let argc = unsafe { *stack };
     let argv = unsafe { stack.add(1) }.cast::<*const u8>();
     let envp = unsafe { argv.add(argc + 1) };

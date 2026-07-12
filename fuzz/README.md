@@ -8,6 +8,7 @@ cargo fuzz run artifact_parsers -- -max_len=1048576
 cargo fuzz run container_decompressor -- -max_len=1048576
 cargo fuzz run manifest_parser -- -max_len=8192
 cargo fuzz run runtime_lz4 -- -max_len=1048576
+cargo fuzz run runtime_lzma -- -max_len=1048576
 cargo fuzz run runtime_hash -- -max_len=1048576
 ```
 
@@ -16,9 +17,11 @@ both inspection and full-verification depth. `container_decompressor` rebuilds a
 valid integrity envelope around arbitrary LZ4/Zstandard bytes and caps the
 declared output at 1 MiB, allowing mutations to reach the decoder instead of
 stopping at header hashes. `runtime_lz4` independently exercises the freestanding
-decoder with the same allocation cap. `manifest_parser` checks that every accepted
-manifest has one canonical re-encoding. `runtime_hash` differentially compares
-the compact freestanding implementation with the pinned BLAKE3 crate.
+decoder with the same allocation cap. `runtime_lzma` mutates both the five-byte
+property block and raw range-coded stream while capping output at 1 MiB.
+`manifest_parser` checks that every accepted manifest has one canonical
+re-encoding. `runtime_hash` differentially compares the compact freestanding
+implementation with the pinned BLAKE3 crate.
 
 Release campaigns store minimized crashing inputs as regression fixtures before
 the associated issue is considered fixed. Corpus and crash directories remain

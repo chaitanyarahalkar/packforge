@@ -1,0 +1,38 @@
+[package]
+name = "packforge-lzma-spike"
+version = "0.0.0"
+edition = "2024"
+publish = false
+autobins = false
+
+[features]
+comparison-encoders = ["dep:liblzma", "dep:lzma-rs"]
+
+[[bin]]
+name = "encode_sdk_rs"
+path = "src/bin/encode_sdk_rs.rs"
+
+[[bin]]
+name = "encode_liblzma"
+path = "src/bin/encode_liblzma.rs"
+required-features = ["comparison-encoders"]
+
+[[bin]]
+name = "encode_lzma_rs"
+path = "src/bin/encode_lzma_rs.rs"
+required-features = ["comparison-encoders"]
+
+[dependencies]
+liblzma = { version = "0.4.7", default-features = false, features = ["static"], optional = true }
+lzma-sdk-rs = { version = "0.2301.1", features = ["decode"] }
+lzma-rs = { version = "0.3.0", optional = true }
+packforge-runtime-linux-x86-64 = { path = "../linux-x86_64" }
+
+[workspace]
+
+[profile.release]
+codegen-units = 1
+lto = "fat"
+opt-level = "z"
+panic = "abort"
+strip = "symbols"

@@ -35,6 +35,13 @@ doc = false
 bench = false
 
 [[bin]]
+name = "runtime_lzma"
+path = "fuzz_targets/runtime_lzma.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
 name = "runtime_hash"
 path = "fuzz_targets/runtime_hash.rs"
 test = false

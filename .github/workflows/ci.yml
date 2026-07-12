@@ -36,6 +36,7 @@ jobs:
             Cargo.lock \
             fuzz/Cargo.lock \
             runtime/linux-x86_64/Cargo.lock \
+            runtime/lzma-spike/Cargo.lock \
             runtime/zstd-spike/Cargo.lock; do
             cargo audit --deny warnings --file "$lockfile"
           done
@@ -53,6 +54,8 @@ jobs:
         run: cargo clippy --bin packforge-runtime-linux-x86-64 --target x86_64-unknown-linux-musl --locked -- -D warnings
       - name: Reproducible runtime artifact
         run: bash scripts/build-runtime.sh --check
+      - name: LZMA size feasibility gate
+        run: bash scripts/ci-lzma-spike.sh
       - name: Static ELF round trip
         env:
           PACKFORGE_CONTAINER_DIGESTS: target/container-corpus/container-digests-linux.tsv
