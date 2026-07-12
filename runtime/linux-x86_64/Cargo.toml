@@ -42,6 +42,11 @@ name = "hot_path_benchmark"
 path = "examples/hot_path_benchmark.rs"
 required-features = ["lzma"]
 
+[[example]]
+name = "codec5_pipeline_profile"
+path = "examples/codec5_pipeline_profile.rs"
+required-features = ["apultra-bcj2", "optimized-hash"]
+
 [workspace]
 
 [dev-dependencies]
