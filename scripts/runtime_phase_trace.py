@@ -84,11 +84,6 @@ def parse_trace(path: Path) -> dict[str, int]:
         raise TraceError(f"trace has no initial execve: {path}")
     loader = [event for event in events if event.pid == initial_exec.pid]
 
-    preads = [event for event in loader if event.name == "pread64"]
-    if len(preads) < 4:
-        raise TraceError(f"trace has an incomplete v2 pread sequence: {path}")
-    payload_read = preads[-1]
-
     fixed_mappings: list[tuple[Event, int, int]] = []
     for event in loader:
         if event.name != "mmap":
@@ -113,6 +108,15 @@ def parse_trace(path: Path) -> dict[str, int]:
     if len(staging_mappings) < 2:
         raise TraceError(f"trace has an incomplete staging-map sequence: {path}")
     original_mapping = staging_mappings[-1]
+
+    preads = [
+        event
+        for event in loader
+        if event.name == "pread64" and event.start_ns < original_mapping.start_ns
+    ]
+    if len(preads) < 4:
+        raise TraceError(f"trace has an incomplete v2 pread sequence: {path}")
+    payload_read = preads[-1]
 
     target_mprotects = []
     for event in loader:
