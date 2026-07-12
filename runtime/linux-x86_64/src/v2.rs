@@ -7,6 +7,8 @@ use core::{ptr, slice};
 
 #[cfg(feature = "lzma-asm")]
 use packforge_runtime_linux_x86_64::bcj;
+#[cfg(feature = "apultra-bcj2")]
+use packforge_runtime_linux_x86_64::{apultra, bcj2};
 use packforge_runtime_linux_x86_64::hash;
 #[cfg(feature = "lzma")]
 use packforge_runtime_linux_x86_64::lzma;
@@ -52,6 +54,22 @@ const AUX_REQUIRED: u8 = 0x0f;
 
 #[unsafe(link_section = ".rodata.packforge.000_panic")]
 static PANIC_MESSAGE: [u8; 28] = *b"packforge: v2 runtime panic\n";
+
+#[cfg(feature = "apultra-bcj2")]
+const CODEC5_ERROR: &[u8] = b"packforge: codec-5 runtime failed\n";
+
+macro_rules! runtime_message {
+    ($message:expr) => {{
+        #[cfg(feature = "apultra-bcj2")]
+        {
+            CODEC5_ERROR
+        }
+        #[cfg(not(feature = "apultra-bcj2"))]
+        {
+            $message as &'static [u8]
+        }
+    }};
+}
 
 global_asm!(
     r#"
@@ -107,6 +125,7 @@ unsafe extern "C" fn runtime_main(stack: *mut usize, rtld_fini: usize) -> ! {
     }
 }
 
+#[cfg(not(feature = "apultra-bcj2"))]
 unsafe fn run(
     stack: *mut usize,
     rtld_fini: usize,
@@ -192,7 +211,7 @@ unsafe fn run(
     reserve_output(output_layout)?;
     let original_mapping = output_layout.file_start as *mut u8;
     let original = unsafe { slice::from_raw_parts_mut(original_mapping, original_length) };
-    match header.codec {
+    let validated_length = match header.codec {
         #[cfg(feature = "lzma")]
         v2_format::CODEC_LZMA1 => {
             let report = lzma::decompress(payload, &header.properties, original)
@@ -200,6 +219,7 @@ unsafe fn run(
             if report.trailing_bytes != header.trailing_bytes {
                 return Err(b"packforge: v2 LZMA1 framing failed\n");
             }
+            original_length
         }
         #[cfg(feature = "lzma-asm")]
         v2_format::CODEC_LZMA1_BCJ4 => {
@@ -235,13 +255,22 @@ unsafe fn run(
             }
             bcj::decode(original)
                 .map_err(|_| b"packforge: codec-4 BCJ decode failed\n" as &'static [u8])?;
+            original_length
+        }
+        #[cfg(feature = "apultra-bcj2")]
+        v2_format::CODEC_APULTRA_BCJ2 => {
+            decode_codec5(payload, original)
+                .map_err(|()| b"packforge: codec-5 decode failed\n" as &'static [u8])?
         }
         _ => return Err(b"packforge: unsupported v2 codec\n"),
-    }
-    if hash::hash(original) != header.original_digest {
+    };
+    if validated_length == original_length && hash::hash(original) != header.original_digest {
         return Err(b"packforge: v2 original integrity failed\n");
     }
-    let elf = v2_format::validate_elf(original, &manifest).map_err(format_error_message)?;
+    let validated = original
+        .get(..validated_length)
+        .ok_or(b"packforge: invalid v2 validated range\n" as &'static [u8])?;
+    let elf = v2_format::validate_elf(validated, &manifest).map_err(format_error_message)?;
 
     finalize_output(output_layout, &manifest)?;
     unsafe { rewrite_auxiliary_vector(stack, elf) }?;
@@ -249,6 +278,133 @@ unsafe fn run(
     let _ = syscall1(SYS_CLOSE, self_fd);
     let _ = syscall2(SYS_MUNMAP, payload_mapping as usize, payload_mapping_length);
     unsafe { transfer(stack, elf.entry_point as usize, rtld_fini) }
+}
+
+#[cfg(feature = "apultra-bcj2")]
+unsafe fn run(
+    stack: *mut usize,
+    rtld_fini: usize,
+) -> Result<core::convert::Infallible, &'static [u8]> {
+    const ERROR: &[u8] = CODEC5_ERROR;
+    let self_fd = syscall4(
+        SYS_OPENAT,
+        AT_FDCWD as usize,
+        c"/proc/self/exe".as_ptr() as usize,
+        O_RDONLY | O_CLOEXEC,
+        0,
+    );
+    if is_error(self_fd) {
+        return Err(ERROR);
+    }
+    let self_fd = self_fd as usize;
+    let file_length = syscall3(SYS_LSEEK, self_fd, 0, SEEK_END);
+    if is_error(file_length) || file_length < TRAILER_LEN as isize {
+        return Err(ERROR);
+    }
+    let file_length = file_length as u64;
+    let mut trailer_bytes = [0u8; TRAILER_LEN];
+    let trailer_offset = file_length.checked_sub(TRAILER_LEN as u64).ok_or(ERROR)?;
+    pread_exact(self_fd, &mut trailer_bytes, trailer_offset).map_err(|()| ERROR)?;
+    let trailer = v2_format::parse_trailer(&trailer_bytes, file_length).map_err(|_| ERROR)?;
+    verify_file_range(
+        self_fd,
+        0,
+        trailer.loader_length,
+        trailer.loader_digest,
+        ERROR,
+    )?;
+
+    let mut header_bytes = [0u8; HEADER_LEN];
+    pread_exact(self_fd, &mut header_bytes, trailer.image_offset).map_err(|()| ERROR)?;
+    let header = v2_format::parse_header(&header_bytes).map_err(|_| ERROR)?;
+    if header.codec != v2_format::CODEC_APULTRA_BCJ2 {
+        return Err(ERROR);
+    }
+    v2_format::validate_image_layout(&trailer, &header).map_err(|_| ERROR)?;
+
+    let manifest_length = usize::try_from(header.manifest_length).map_err(|_| ERROR)?;
+    let mut manifest_storage = [0u8; MAX_MANIFEST_LENGTH];
+    let manifest_bytes = manifest_storage.get_mut(..manifest_length).ok_or(ERROR)?;
+    let manifest_offset = trailer
+        .image_offset
+        .checked_add(HEADER_LEN as u64)
+        .ok_or(ERROR)?;
+    pread_exact(self_fd, manifest_bytes, manifest_offset).map_err(|()| ERROR)?;
+    if hash::hash(manifest_bytes) != header.manifest_digest {
+        return Err(ERROR);
+    }
+    let manifest = v2_format::parse_manifest(manifest_bytes, header.original_length)
+        .map_err(|_| ERROR)?;
+
+    let payload_length = usize::try_from(header.payload_length).map_err(|_| ERROR)?;
+    let payload_mapping = map_writable(payload_length).ok_or(ERROR)?;
+    let payload = unsafe { slice::from_raw_parts_mut(payload_mapping, payload_length) };
+    let payload_offset = manifest_offset
+        .checked_add(header.manifest_length)
+        .ok_or(ERROR)?;
+    pread_exact(self_fd, payload, payload_offset).map_err(|()| ERROR)?;
+    if hash::hash(payload) != header.payload_digest {
+        return Err(ERROR);
+    }
+
+    let original_length = usize::try_from(header.original_length).map_err(|_| ERROR)?;
+    let output_layout = v2_format::direct_output_layout(&manifest).map_err(|_| ERROR)?;
+    reserve_output(output_layout)?;
+    let original_mapping = output_layout.file_start as *mut u8;
+    let original = unsafe { slice::from_raw_parts_mut(original_mapping, original_length) };
+    let runtime_length = decode_codec5(payload, original).map_err(|()| ERROR)?;
+    let runtime = original.get(..runtime_length).ok_or(ERROR)?;
+    let elf = v2_format::validate_elf(runtime, &manifest).map_err(|_| ERROR)?;
+
+    finalize_output(output_layout, &manifest)?;
+    unsafe { rewrite_auxiliary_vector(stack, elf) }?;
+    let _ = syscall1(SYS_CLOSE, self_fd);
+    let _ = syscall2(SYS_MUNMAP, payload_mapping as usize, payload_length);
+    unsafe { transfer(stack, elf.entry_point as usize, rtld_fini) }
+}
+
+#[cfg(feature = "apultra-bcj2")]
+fn decode_codec5(payload: &[u8], original: &mut [u8]) -> Result<usize, ()> {
+    let table = v2_format::parse_codec5_table(payload, original.len()).map_err(|_| ())?;
+    let scratch_mapping = map_writable(table.runtime_length).ok_or(())?;
+    let scratch = unsafe { slice::from_raw_parts_mut(scratch_mapping, table.runtime_length) };
+    let main_length = table.entries[0].decoded_length;
+    let call_length = table.entries[1].decoded_length;
+    let (main, remainder) = scratch.split_at_mut(main_length);
+    let (call, jump) = remainder.split_at_mut(call_length);
+    decode_apultra_entry(payload, table.entries[0], main)?;
+    decode_apultra_entry(payload, table.entries[1], call)?;
+    decode_apultra_entry(payload, table.entries[2], jump)?;
+    let rc = codec5_entry(payload, table.entries[3]).ok_or(())?;
+    let runtime = original.get_mut(..table.runtime_length).ok_or(())?;
+    bcj2::decode(main, call, jump, rc, runtime).map_err(|_| ())?;
+    if hash::hash(runtime) != table.runtime_digest {
+        return Err(());
+    }
+    let _ = syscall2(SYS_MUNMAP, scratch_mapping as usize, table.runtime_length);
+    Ok(table.runtime_length)
+}
+
+#[cfg(feature = "apultra-bcj2")]
+fn codec5_entry(payload: &[u8], entry: v2_format::Codec5Entry) -> Option<&[u8]> {
+    let end = entry
+        .compressed_offset
+        .checked_add(entry.compressed_length)
+        ?;
+    payload.get(entry.compressed_offset..end)
+}
+
+#[cfg(feature = "apultra-bcj2")]
+fn decode_apultra_entry(
+    payload: &[u8],
+    entry: v2_format::Codec5Entry,
+    output: &mut [u8],
+) -> Result<(), ()> {
+    let compressed = codec5_entry(payload, entry).ok_or(())?;
+    if output.is_empty() && compressed.is_empty() {
+        return Ok(());
+    }
+    apultra::decompress(compressed, output).map_err(|_| ())
 }
 
 fn verify_file_range(
@@ -276,9 +432,9 @@ fn verify_file_range(
 
 fn reserve_output(layout: OutputLayout) -> Result<(), &'static [u8]> {
     let address = usize::try_from(layout.start)
-        .map_err(|_| b"packforge: target mapping is out of range\n" as &'static [u8])?;
+        .map_err(|_| runtime_message!(b"packforge: target mapping is out of range\n"))?;
     let length = usize::try_from(layout.length)
-        .map_err(|_| b"packforge: target mapping is out of range\n" as &'static [u8])?;
+        .map_err(|_| runtime_message!(b"packforge: target mapping is out of range\n"))?;
     let mapped = syscall6(
         SYS_MMAP,
         address,
@@ -292,7 +448,7 @@ fn reserve_output(layout: OutputLayout) -> Result<(), &'static [u8]> {
         if !is_error(mapped) {
             let _ = syscall2(SYS_MUNMAP, mapped as usize, length);
         }
-        return Err(b"packforge: target address collision\n");
+        return Err(runtime_message!(b"packforge: target address collision\n"));
     }
     Ok(())
 }
@@ -302,10 +458,10 @@ fn finalize_output(layout: OutputLayout, manifest: &Manifest) -> Result<(), &'st
         let source = layout
             .file_start
             .checked_add(segment.file_offset)
-            .ok_or(b"packforge: target source is out of range\n" as &'static [u8])?;
+            .ok_or(runtime_message!(b"packforge: target source is out of range\n"))?;
         if source != segment.virtual_address {
             let length = usize::try_from(segment.file_size)
-                .map_err(|_| b"packforge: target source is out of range\n" as &'static [u8])?;
+                .map_err(|_| runtime_message!(b"packforge: target source is out of range\n"))?;
             let destination = segment.virtual_address as *mut u8;
             let source = source as *const u8;
             if (destination as usize) <= (source as usize) {
@@ -323,9 +479,9 @@ fn finalize_output(layout: OutputLayout, manifest: &Manifest) -> Result<(), &'st
         let zero_start = segment
             .virtual_address
             .checked_add(segment.file_size)
-            .ok_or(b"packforge: target address is out of range\n" as &'static [u8])?;
+            .ok_or(runtime_message!(b"packforge: target address is out of range\n"))?;
         let zero_length = usize::try_from(segment.memory_size - segment.file_size)
-            .map_err(|_| b"packforge: target mapping is out of range\n" as &'static [u8])?;
+            .map_err(|_| runtime_message!(b"packforge: target mapping is out of range\n"))?;
         for index in 0..zero_length {
             unsafe { ptr::write_volatile((zero_start as *mut u8).add(index), 0) };
         }
@@ -334,7 +490,7 @@ fn finalize_output(layout: OutputLayout, manifest: &Manifest) -> Result<(), &'st
     let span_end = layout
         .start
         .checked_add(layout.length)
-        .ok_or(b"packforge: target mapping is out of range\n" as &'static [u8])?;
+        .ok_or(runtime_message!(b"packforge: target mapping is out of range\n"))?;
     let mut cursor = layout.start;
     for segment in manifest.segments.iter().take(manifest.count) {
         if segment.map_start > cursor {
@@ -350,12 +506,12 @@ fn finalize_output(layout: OutputLayout, manifest: &Manifest) -> Result<(), &'st
             segment.map_length as usize,
             segment_protection(*segment),
         )) {
-            return Err(b"packforge: cannot apply target protections\n");
+            return Err(runtime_message!(b"packforge: cannot apply target protections\n"));
         }
         cursor = segment
             .map_start
             .checked_add(segment.map_length)
-            .ok_or(b"packforge: target mapping is out of range\n" as &'static [u8])?;
+            .ok_or(runtime_message!(b"packforge: target mapping is out of range\n"))?;
     }
     if cursor < span_end {
         let _ = syscall2(SYS_MUNMAP, cursor as usize, (span_end - cursor) as usize);
@@ -446,6 +602,7 @@ unsafe fn transfer(stack: *mut usize, entry: usize, rtld_fini: usize) -> ! {
     }
 }
 
+#[cfg(not(feature = "apultra-bcj2"))]
 fn format_error_message(error: v2_format::Error) -> &'static [u8] {
     match error {
         v2_format::Error::Integrity => b"packforge: v2 metadata integrity failed\n",

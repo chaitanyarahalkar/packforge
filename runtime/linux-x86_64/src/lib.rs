@@ -9,6 +9,10 @@ pub mod hash;
 pub use packforge_runtime_hash as hash;
 #[cfg(feature = "lzma-asm")]
 pub mod bcj;
+#[cfg(feature = "apultra-bcj2")]
+pub mod apultra;
+#[cfg(feature = "apultra-bcj2")]
+pub mod bcj2;
 pub mod lz4;
 #[cfg(feature = "lzma")]
 pub mod lzma;

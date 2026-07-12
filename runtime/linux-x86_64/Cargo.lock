@@ -84,6 +84,13 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2bcd2b73b761b866258ca43401fa0d3119f54fbff51132539e8d1d2b05a73a53"
 
 [[package]]
+name = "packforge-codec5-sys"
+version = "0.1.0"
+dependencies = [
+ "cc",
+]
+
+[[package]]
 name = "packforge-lzma-decoder"
 version = "0.1.0"
 
@@ -98,6 +105,7 @@ dependencies = [
  "blake3",
  "lz4_flex",
  "lzma-sdk-rs",
+ "packforge-codec5-sys",
  "packforge-lzma-decoder",
  "packforge-runtime-hash",
 ]

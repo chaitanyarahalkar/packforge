@@ -12,6 +12,7 @@ packforge-runtime-hash = { path = "../../crates/packforge-runtime-hash", feature
 lzma = ["dep:packforge-lzma-decoder"]
 lzma-asm = []
 lzma-parallel = ["lzma-asm"]
+apultra-bcj2 = []
 optimized-hash = ["dep:packforge-runtime-hash"]
 optimized = []
 runtime-v2 = []
@@ -41,6 +42,7 @@ required-features = ["lzma"]
 blake3 = { version = "1.8.5", features = ["pure"] }
 lz4_flex = { version = "0.13.1", default-features = false, features = ["safe-encode", "std"] }
 lzma-sdk-rs = "0.2301.1"
+packforge-codec5-sys = { path = "../../crates/packforge-codec5-sys" }
 
 [profile.dev]
 panic = "abort"

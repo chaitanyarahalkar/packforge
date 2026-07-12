@@ -3,14 +3,20 @@ set -euo pipefail
 
 workspace="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 runtime="$workspace/runtime/linux-x86_64"
-artifact="$workspace/runtime/artifacts/linux-x86_64/loader-v2"
-checksum_file="$artifact.sha256"
 mode="${1:---check}"
 opt_level="${PACKFORGE_RUNTIME_V2_OPT_LEVEL:-z}"
 relocation_model="${PACKFORGE_RUNTIME_V2_RELOCATION_MODEL:-pic}"
 decoder_opt_level="${PACKFORGE_RUNTIME_V2_DECODER_OPT_LEVEL-3}"
 decoder_implementation="${PACKFORGE_RUNTIME_V2_DECODER:-parallel}"
 hash_implementation="${PACKFORGE_RUNTIME_V2_HASH:-compact-opt2}"
+artifact_name="loader-v2"
+size_limit=23500
+if [[ "$decoder_implementation" == "apultra-bcj2" ]]; then
+  artifact_name="loader-v2-codec5"
+  size_limit=15701
+fi
+artifact="$workspace/runtime/artifacts/linux-x86_64/$artifact_name"
+checksum_file="$artifact.sha256"
 
 case "$mode" in
   --check | --update | --candidate) ;;
@@ -48,9 +54,9 @@ fi
 
 case "$hash_implementation" in
   compact) runtime_features=lzma ;;
-  compact-opt1 | compact-opt2) runtime_features=lzma,optimized-hash ;;
+  compact-optz | compact-opt1 | compact-opt2) runtime_features=lzma,optimized-hash ;;
   *)
-    printf 'PACKFORGE_RUNTIME_V2_HASH must be compact, compact-opt1, or compact-opt2\n' >&2
+    printf 'PACKFORGE_RUNTIME_V2_HASH must be compact, compact-optz, compact-opt1, or compact-opt2\n' >&2
     exit 2
     ;;
 esac
@@ -61,8 +67,9 @@ case "$decoder_implementation" in
   rust) ;;
   asm) runtime_features="${runtime_features/lzma/lzma-asm}" ;;
   parallel) runtime_features="${runtime_features/lzma/lzma-parallel}" ;;
+  apultra-bcj2) runtime_features="${runtime_features/lzma/apultra-bcj2}" ;;
   *)
-    printf 'PACKFORGE_RUNTIME_V2_DECODER must be none, rust, asm, or parallel\n' >&2
+    printf 'PACKFORGE_RUNTIME_V2_DECODER must be none, rust, asm, parallel, or apultra-bcj2\n' >&2
     exit 2
     ;;
 esac
@@ -125,6 +132,9 @@ if [[ -n "$decoder_opt_level" ]]; then
 fi
 if [[ "$hash_implementation" == compact-opt* ]]; then
   hash_opt_level="${hash_implementation#compact-opt}"
+  if [[ "$hash_opt_level" == "z" ]]; then
+    hash_opt_level='"z"'
+  fi
   cargo_arguments=(
     --config "profile.release.package.packforge-runtime-hash.opt-level=$hash_opt_level"
     "${cargo_arguments[@]}"
@@ -142,8 +152,8 @@ trap 'rm -f "$normalized"' EXIT
   "$raw_built" "$normalized"
 
 size="$(wc -c < "$normalized" | tr -d ' ')"
-if (( size > 23500 )); then
-  printf 'runtime v2 artifact is %s bytes; limit is 23500\n' "$size" >&2
+if (( size > size_limit )); then
+  printf 'runtime v2 artifact is %s bytes; limit is %s\n' "$size" "$size_limit" >&2
   exit 1
 fi
 python3 "$workspace/scripts/check-runtime-v2-elf.py" "$normalized"
@@ -165,7 +175,7 @@ fi
 
 if [[ "$mode" == "--update" ]]; then
   install -m 0644 "$normalized" "$artifact"
-  printf '%s  loader-v2\n' "$digest" > "$checksum_file"
+  printf '%s  %s\n' "$digest" "$artifact_name" > "$checksum_file"
 elif [[ "$mode" == "--check" ]]; then
   cmp "$normalized" "$artifact"
   expected="$(awk '{print $1}' "$checksum_file")"

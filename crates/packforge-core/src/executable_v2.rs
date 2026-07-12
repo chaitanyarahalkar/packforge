@@ -50,6 +50,12 @@ pub const LINUX_X86_64_RUNTIME_V2: &[u8] = include_bytes!(concat!(
     "/../../runtime/artifacts/linux-x86_64/loader-v2"
 ));
 
+/// Reproducible codec 5 direct-load runtime used by the balanced selector.
+pub const LINUX_X86_64_RUNTIME_V2_CODEC5: &[u8] = include_bytes!(concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/../../runtime/artifacts/linux-x86_64/loader-v2-codec5"
+));
+
 /// Stable metadata returned for an experimental executable v2 artifact.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct ExecutableV2Info {
@@ -59,13 +65,15 @@ pub struct ExecutableV2Info {
     pub executable_version: u16,
     /// Native loader ABI version.
     pub runtime_abi_version: u16,
+    /// Payload codec identifier selected for this artifact.
+    pub codec: u16,
     /// Validation depth reached.
     pub verification: Verification,
     /// Native loader length.
     pub loader_size: u64,
     /// Canonical manifest length.
     pub manifest_size: u64,
-    /// Raw LZMA1 payload length.
+    /// Compressed payload length.
     pub payload_size: u64,
     /// Original executable length.
     pub original_size: u64,
@@ -286,6 +294,57 @@ pub fn pack_executable_v2_codec5(
     loader: &[u8],
 ) -> Result<PackedExecutableV2, ExecutableV2Error> {
     pack_executable_v2_with_codec(original, original_mode, options, loader, CODEC_APULTRA_BCJ2)
+}
+
+/// Packs both admitted M2 candidates and applies the deterministic balanced selector.
+///
+/// Codec 5 wins ties and is selected while its complete artifact is at most 105%
+/// of codec 4. The selected artifact must still be smaller than the original
+/// unless `allow_larger` is enabled.
+///
+/// # Errors
+///
+/// Returns [`ExecutableV2Error`] if either candidate cannot be constructed or
+/// the selected artifact is not beneficial without explicit opt-in.
+pub fn pack_executable_v2_balanced(
+    original: &[u8],
+    original_mode: u32,
+    options: PackOptions,
+) -> Result<PackedExecutableV2, ExecutableV2Error> {
+    let candidate_options = PackOptions {
+        profile: options.profile,
+        allow_larger: true,
+    };
+    let codec4 = pack_executable_v2_with_codec(
+        original,
+        original_mode,
+        candidate_options,
+        LINUX_X86_64_RUNTIME_V2,
+        CODEC_LZMA1_BCJ4,
+    )?;
+    let codec5 = pack_executable_v2_with_codec(
+        original,
+        original_mode,
+        candidate_options,
+        LINUX_X86_64_RUNTIME_V2_CODEC5,
+        CODEC_APULTRA_BCJ2,
+    )?;
+    let selected = if prefer_codec5(codec4.bytes.len(), codec5.bytes.len()) {
+        codec5
+    } else {
+        codec4
+    };
+    if !options.allow_larger && selected.bytes.len() >= original.len() {
+        return Err(ExecutableV2Error::NotBeneficial {
+            original: usize_to_u64(original.len(), "original executable")?,
+            executable: usize_to_u64(selected.bytes.len(), "executable")?,
+        });
+    }
+    Ok(selected)
+}
+
+fn prefer_codec5(codec4_length: usize, codec5_length: usize) -> bool {
+    (codec5_length as u128) * 100 <= (codec4_length as u128) * 105
 }
 
 fn pack_executable_v2_with_codec(
@@ -802,6 +861,7 @@ fn build_info(
         schema_version: 1,
         executable_version: EXECUTABLE_V2_VERSION,
         runtime_abi_version: RUNTIME_V2_ABI_VERSION,
+        codec: header.codec,
         verification,
         loader_size: trailer.loader_length,
         manifest_size: header.manifest_length,
@@ -887,12 +947,13 @@ fn hex(bytes: &[u8; 32]) -> String {
 mod tests {
     use super::{
         EXECUTABLE_V2_HEADER_LEN, ExecutableV2Error, PackOptions, Profile, Verification,
-        inspect_executable_v2, pack_executable_v2, pack_executable_v2_with_codec,
-        unpack_executable_v2, validate_direct_output_layout, verify_executable_v2,
+        inspect_executable_v2, pack_executable_v2, pack_executable_v2_balanced,
+        pack_executable_v2_with_codec, prefer_codec5, unpack_executable_v2,
+        validate_direct_output_layout, verify_executable_v2,
     };
     use crate::executable_v2_codec4::CODEC_LZMA1_BCJ4;
     use crate::executable_v2_codec5::CODEC_APULTRA_BCJ2;
-    use crate::{LINUX_X86_64_RUNTIME_V2, MAX_ORIGINAL_SIZE};
+    use crate::{LINUX_X86_64_RUNTIME_V2, LINUX_X86_64_RUNTIME_V2_CODEC5, MAX_ORIGINAL_SIZE};
     use crate::{ManifestSegment, ManifestV0};
 
     fn fixture() -> Vec<u8> {
@@ -1025,6 +1086,46 @@ mod tests {
             0
         );
         assert_eq!(unpack_executable_v2(&packed.bytes).unwrap().bytes, original);
+    }
+
+    #[test]
+    fn balanced_selector_uses_checked_five_percent_boundary_and_codec5_ties() {
+        assert!(prefer_codec5(100, 105));
+        assert!(!prefer_codec5(100, 106));
+        assert!(prefer_codec5(100, 100));
+
+        let original = fixture();
+        let options = PackOptions {
+            profile: Profile::Balanced,
+            allow_larger: true,
+        };
+        let codec4 = pack_executable_v2_with_codec(
+            &original,
+            0o755,
+            options,
+            LINUX_X86_64_RUNTIME_V2,
+            CODEC_LZMA1_BCJ4,
+        )
+        .unwrap();
+        let codec5 = pack_executable_v2_with_codec(
+            &original,
+            0o755,
+            options,
+            LINUX_X86_64_RUNTIME_V2_CODEC5,
+            CODEC_APULTRA_BCJ2,
+        )
+        .unwrap();
+        let expected = if prefer_codec5(codec4.bytes.len(), codec5.bytes.len()) {
+            codec5.bytes
+        } else {
+            codec4.bytes
+        };
+        assert_eq!(
+            pack_executable_v2_balanced(&original, 0o755, options)
+                .unwrap()
+                .bytes,
+            expected
+        );
     }
 
     #[test]

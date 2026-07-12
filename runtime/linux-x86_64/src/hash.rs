@@ -18,7 +18,7 @@ const IV: [u32; 8] = [
     0x5BE0_CD19,
 ];
 
-const MSG_SCHEDULE: [[usize; 16]; 7] = [
+const MSG_SCHEDULE: [[u8; 16]; 7] = [
     [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15],
     [2, 6, 3, 10, 7, 0, 4, 13, 1, 11, 12, 5, 9, 14, 15, 8],
     [3, 4, 10, 12, 13, 2, 7, 14, 6, 5, 9, 0, 11, 15, 8, 1],
@@ -188,15 +188,15 @@ fn compress(
     state
 }
 
-fn round(state: &mut [u32; 16], message: &[u32; 16], schedule: &[usize; 16]) {
+fn round(state: &mut [u32; 16], message: &[u32; 16], schedule: &[u8; 16]) {
     g(
         state,
         0,
         4,
         8,
         12,
-        message[schedule[0]],
-        message[schedule[1]],
+        message[usize::from(schedule[0])],
+        message[usize::from(schedule[1])],
     );
     g(
         state,
@@ -204,8 +204,8 @@ fn round(state: &mut [u32; 16], message: &[u32; 16], schedule: &[usize; 16]) {
         5,
         9,
         13,
-        message[schedule[2]],
-        message[schedule[3]],
+        message[usize::from(schedule[2])],
+        message[usize::from(schedule[3])],
     );
     g(
         state,
@@ -213,8 +213,8 @@ fn round(state: &mut [u32; 16], message: &[u32; 16], schedule: &[usize; 16]) {
         6,
         10,
         14,
-        message[schedule[4]],
-        message[schedule[5]],
+        message[usize::from(schedule[4])],
+        message[usize::from(schedule[5])],
     );
     g(
         state,
@@ -222,8 +222,8 @@ fn round(state: &mut [u32; 16], message: &[u32; 16], schedule: &[usize; 16]) {
         7,
         11,
         15,
-        message[schedule[6]],
-        message[schedule[7]],
+        message[usize::from(schedule[6])],
+        message[usize::from(schedule[7])],
     );
     g(
         state,
@@ -231,8 +231,8 @@ fn round(state: &mut [u32; 16], message: &[u32; 16], schedule: &[usize; 16]) {
         5,
         10,
         15,
-        message[schedule[8]],
-        message[schedule[9]],
+        message[usize::from(schedule[8])],
+        message[usize::from(schedule[9])],
     );
     g(
         state,
@@ -240,8 +240,8 @@ fn round(state: &mut [u32; 16], message: &[u32; 16], schedule: &[usize; 16]) {
         6,
         11,
         12,
-        message[schedule[10]],
-        message[schedule[11]],
+        message[usize::from(schedule[10])],
+        message[usize::from(schedule[11])],
     );
     g(
         state,
@@ -249,8 +249,8 @@ fn round(state: &mut [u32; 16], message: &[u32; 16], schedule: &[usize; 16]) {
         7,
         8,
         13,
-        message[schedule[12]],
-        message[schedule[13]],
+        message[usize::from(schedule[12])],
+        message[usize::from(schedule[13])],
     );
     g(
         state,
@@ -258,8 +258,8 @@ fn round(state: &mut [u32; 16], message: &[u32; 16], schedule: &[usize; 16]) {
         4,
         9,
         14,
-        message[schedule[14]],
-        message[schedule[15]],
+        message[usize::from(schedule[14])],
+        message[usize::from(schedule[15])],
     );
 }
 

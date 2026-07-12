@@ -32,8 +32,9 @@ pub use executable::{
 };
 pub use executable_v2::{
     EXECUTABLE_V2_HEADER_LEN, EXECUTABLE_V2_VERSION, ExecutableV2Error, ExecutableV2Info,
-    LINUX_X86_64_RUNTIME_V2, MAX_EXECUTABLE_V2_SIZE, MAX_RUNTIME_V2_SIZE, PackedExecutableV2,
-    RUNTIME_V2_ABI_VERSION, UnpackedExecutableV2, inspect_executable_v2, pack_executable_v2,
+    LINUX_X86_64_RUNTIME_V2, LINUX_X86_64_RUNTIME_V2_CODEC5, MAX_EXECUTABLE_V2_SIZE,
+    MAX_RUNTIME_V2_SIZE, PackedExecutableV2, RUNTIME_V2_ABI_VERSION, UnpackedExecutableV2,
+    inspect_executable_v2, pack_executable_v2, pack_executable_v2_balanced,
     pack_executable_v2_codec4, pack_executable_v2_codec5, unpack_executable_v2,
     verify_executable_v2,
 };
@@ -247,7 +248,7 @@ pub fn pack_executable_v2_file(
     if original_mode & 0o111 == 0 {
         return Err(Error::InputNotExecutable(input_path.to_path_buf()));
     }
-    let artifact = pack_executable_v2(&input, original_mode, options, LINUX_X86_64_RUNTIME_V2)?;
+    let artifact = pack_executable_v2_balanced(&input, original_mode, options)?;
     write_new(output_path, &artifact.bytes, original_mode & 0o777)?;
     Ok(artifact.info)
 }

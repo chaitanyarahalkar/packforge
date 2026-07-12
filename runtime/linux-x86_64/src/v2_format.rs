@@ -13,12 +13,16 @@ pub const MAX_LOADER_SIZE: u64 = 23_500;
 pub const PAGE_SIZE: u64 = 4096;
 pub const CODEC_LZMA1: u16 = 3;
 pub const CODEC_LZMA1_BCJ4: u16 = 4;
+pub const CODEC_APULTRA_BCJ2: u16 = 5;
 pub const CODEC4_CHUNK_COUNT: usize = 4;
 pub const CODEC4_TABLE_LEN: usize = 128;
+pub const CODEC5_STREAM_COUNT: usize = 4;
+pub const CODEC5_TABLE_LEN: usize = 160;
 
 const TRAILER_MAGIC: &[u8; 8] = b"PFGEXE02";
 const HEADER_MAGIC: &[u8; 8] = b"PFGIMG02";
 const MANIFEST_MAGIC: &[u8; 8] = b"PFGMAN00";
+const CODEC5_MAGIC: &[u8; 8] = b"PFGBCJ05";
 const FIXED_LZMA_PROPERTIES: u8 = 0x5d;
 const MIN_DICTIONARY_SIZE: u32 = 1 << 12;
 const MAX_DICTIONARY_SIZE: u32 = 1 << 26;
@@ -71,6 +75,21 @@ pub struct Codec4Chunk {
     pub compressed_offset: usize,
     pub compressed_length: usize,
     pub trailing_bytes: u8,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Codec5Entry {
+    pub decoded_length: usize,
+    pub compressed_offset: usize,
+    pub compressed_length: usize,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Codec5Table {
+    pub runtime_length: usize,
+    pub runtime_digest: [u8; 32],
+    pub entries: [Codec5Entry; CODEC5_STREAM_COUNT],
+    pub recovery_offset: usize,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -180,14 +199,14 @@ pub fn parse_header(bytes: &[u8; HEADER_LEN]) -> Result<Header, Error> {
     let dictionary =
         u32::from_le_bytes([properties[1], properties[2], properties[3], properties[4]]);
     let codec = get_u16(bytes, 12);
-    if !matches!(codec, CODEC_LZMA1 | CODEC_LZMA1_BCJ4)
+    if !matches!(codec, CODEC_LZMA1 | CODEC_LZMA1_BCJ4 | CODEC_APULTRA_BCJ2)
         || get_u16(bytes, 14) != 0
         || bytes[26..32].iter().any(|byte| *byte != 0)
         || bytes[56..64].iter().any(|byte| *byte != 0)
         || properties[0] != FIXED_LZMA_PROPERTIES
         || !(MIN_DICTIONARY_SIZE..=MAX_DICTIONARY_SIZE).contains(&dictionary)
         || (codec == CODEC_LZMA1 && bytes[25] > 5)
-        || (codec == CODEC_LZMA1_BCJ4 && bytes[25] != 0)
+        || (matches!(codec, CODEC_LZMA1_BCJ4 | CODEC_APULTRA_BCJ2) && bytes[25] != 0)
     {
         return Err(Error::Metadata);
     }
@@ -269,6 +288,73 @@ pub fn parse_codec4_chunks(
         return Err(Error::Range);
     }
     Ok(chunks)
+}
+
+pub fn parse_codec5_table(
+    payload: &[u8],
+    original_length: usize,
+) -> Result<Codec5Table, Error> {
+    if payload.len() <= CODEC5_TABLE_LEN
+        || payload.get(..8) != Some(CODEC5_MAGIC)
+        || get_u16(payload, 8) != 1
+        || usize::from(get_u16(payload, 10)) != CODEC5_TABLE_LEN
+        || payload[12..16].iter().any(|byte| *byte != 0)
+        || payload[56] > 5
+        || payload[57..64].iter().any(|byte| *byte != 0)
+    {
+        return Err(Error::Metadata);
+    }
+    let runtime_length = to_usize(get_u64(payload, 16))?;
+    if runtime_length == 0 || runtime_length > original_length {
+        return Err(Error::Range);
+    }
+    let runtime_digest = array_32(payload, 24);
+    let mut expected_offset = CODEC5_TABLE_LEN;
+    let mut entries = [Codec5Entry {
+        decoded_length: 0,
+        compressed_offset: 0,
+        compressed_length: 0,
+    }; CODEC5_STREAM_COUNT];
+    for (index, entry) in entries.iter_mut().enumerate() {
+        let offset = 64 + index * 24;
+        *entry = Codec5Entry {
+            decoded_length: to_usize(get_u64(payload, offset))?,
+            compressed_offset: to_usize(get_u64(payload, offset + 8))?,
+            compressed_length: to_usize(get_u64(payload, offset + 16))?,
+        };
+        let end = entry
+            .compressed_offset
+            .checked_add(entry.compressed_length)
+            .ok_or(Error::Range)?;
+        if (matches!(index, 0 | 3)
+            && (entry.decoded_length == 0 || entry.compressed_length == 0))
+            || entry.compressed_offset != expected_offset
+            || end > payload.len()
+            || (matches!(index, 1 | 2) && entry.decoded_length % 4 != 0)
+            || (index == 3 && entry.decoded_length != entry.compressed_length)
+            || (index < 3 && (entry.decoded_length == 0) != (entry.compressed_length == 0))
+        {
+            return Err(Error::Range);
+        }
+        expected_offset = end;
+    }
+    if entries[0]
+        .decoded_length
+        .checked_add(entries[1].decoded_length)
+        .and_then(|length| length.checked_add(entries[2].decoded_length))
+        != Some(runtime_length)
+        || (runtime_length == original_length
+            && (expected_offset != payload.len() || payload[56] != 0))
+        || (runtime_length < original_length && expected_offset == payload.len())
+    {
+        return Err(Error::Range);
+    }
+    Ok(Codec5Table {
+        runtime_length,
+        runtime_digest,
+        entries,
+        recovery_offset: expected_offset,
+    })
 }
 
 pub fn validate_image_layout(trailer: &Trailer, header: &Header) -> Result<(), Error> {
@@ -579,8 +665,8 @@ mod tests {
     use std::vec;
 
     use super::{
-        Error, HEADER_LEN, MANIFEST_HEADER_LEN, MANIFEST_SEGMENT_LEN, direct_output_layout,
-        parse_header, parse_manifest,
+        CODEC5_TABLE_LEN, Error, HEADER_LEN, MANIFEST_HEADER_LEN, MANIFEST_SEGMENT_LEN,
+        direct_output_layout, parse_codec5_table, parse_header, parse_manifest,
     };
 
     #[test]
@@ -632,5 +718,28 @@ mod tests {
             .copy_from_slice(&0x403000u64.to_le_bytes());
         let parsed = parse_manifest(&manifest, 0x3000).unwrap();
         assert_eq!(direct_output_layout(&parsed).unwrap().file_start, 0x400000);
+    }
+
+    #[test]
+    fn parses_canonical_codec5_table_and_rejects_noncontiguous_streams() {
+        let mut payload = vec![0u8; CODEC5_TABLE_LEN + 9];
+        payload[..8].copy_from_slice(b"PFGBCJ05");
+        payload[8..10].copy_from_slice(&1u16.to_le_bytes());
+        payload[10..12].copy_from_slice(&(CODEC5_TABLE_LEN as u16).to_le_bytes());
+        payload[16..24].copy_from_slice(&8u64.to_le_bytes());
+        for (index, (decoded, offset, compressed)) in
+            [(4u64, 160u64, 2u64), (4, 162, 2), (0, 164, 0), (5, 164, 5)]
+                .into_iter()
+                .enumerate()
+        {
+            let entry = 64 + index * 24;
+            payload[entry..entry + 8].copy_from_slice(&decoded.to_le_bytes());
+            payload[entry + 8..entry + 16].copy_from_slice(&offset.to_le_bytes());
+            payload[entry + 16..entry + 24].copy_from_slice(&compressed.to_le_bytes());
+        }
+        assert_eq!(parse_codec5_table(&payload, 8).unwrap().runtime_length, 8);
+
+        payload[72..80].copy_from_slice(&161u64.to_le_bytes());
+        assert_eq!(parse_codec5_table(&payload, 8), Err(Error::Range));
     }
 }
