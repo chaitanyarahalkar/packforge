@@ -98,10 +98,14 @@ def inspect_payload(inspect_report: dict[str, Any], fixture_id: str) -> tuple[st
     if inspect_report.get("artifact_kind") != "executable":
         raise ContractError(f"fixture {fixture_id} inspect report is not an executable")
     container = inspect_report.get("container")
-    if not isinstance(container, dict):
-        raise ContractError(f"fixture {fixture_id} inspect report has no container metadata")
-    codec = container.get("codec")
-    payload_size = container.get("payload_size")
+    if isinstance(container, dict):
+        codec = container.get("codec")
+        payload_size = container.get("payload_size")
+    elif inspect_report.get("executable_version") == 2:
+        codec = "lzma1"
+        payload_size = inspect_report.get("payload_size")
+    else:
+        raise ContractError(f"fixture {fixture_id} inspect report has no payload metadata")
     if codec not in {"lz4", "lzma1"} or not isinstance(payload_size, int) or payload_size <= 0:
         raise ContractError(f"fixture {fixture_id} inspect report has invalid codec metadata")
     decoder_memory = inspect_report.get("decoder_memory_bytes")

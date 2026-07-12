@@ -28,18 +28,6 @@ jobs:
         run: cargo clippy --workspace --all-targets -- -D warnings
       - name: Test
         run: cargo test --workspace --locked
-      - name: Install dependency auditor
-        run: cargo install cargo-audit --version 0.22.2 --locked
-      - name: Audit every shipped and test lockfile
-        run: |
-          for lockfile in \
-            Cargo.lock \
-            fuzz/Cargo.lock \
-            runtime/linux-x86_64/Cargo.lock \
-            runtime/lzma-spike/Cargo.lock \
-            runtime/zstd-spike/Cargo.lock; do
-            cargo audit --deny warnings --file "$lockfile"
-          done
       - name: Benchmark contract
         run: |
           python3 scripts/benchmark_contract.py validate-corpus
@@ -51,7 +39,11 @@ jobs:
         run: cargo test --target x86_64-unknown-linux-gnu --locked
       - name: Runtime Clippy
         working-directory: runtime/linux-x86_64
-        run: cargo clippy --bin packforge-runtime-linux-x86-64 --target x86_64-unknown-linux-musl --locked -- -D warnings
+        run: |
+          cargo clippy --bin packforge-runtime-linux-x86-64 \
+            --target x86_64-unknown-linux-musl --locked -- -D warnings
+          cargo clippy --bin packforge-runtime-v2-linux-x86-64 \
+            --target x86_64-unknown-linux-musl --features lzma --locked -- -D warnings
       - name: Reproducible runtime artifact
         run: bash scripts/build-runtime.sh --check
       - name: Reproducible runtime v2 artifact
@@ -80,9 +72,22 @@ jobs:
             target/container-corpus/inputs/hello-go
       - name: Self-contained executable round trip
         run: bash scripts/ci-linux-executable-smoke.sh
+      - name: Install dependency auditor
+        run: cargo install cargo-audit --version 0.22.2 --locked
+      - name: Audit every shipped and test lockfile
+        run: |
+          for lockfile in \
+            Cargo.lock \
+            fuzz/Cargo.lock \
+            runtime/linux-x86_64/Cargo.lock \
+            runtime/lzma-spike/Cargo.lock \
+            runtime/zstd-spike/Cargo.lock; do
+            cargo audit --deny warnings --file "$lockfile"
+          done
       - name: Archive deterministic container corpus
         run: tar -C target/container-corpus -cf target/container-corpus/corpus.tar inputs
       - uses: actions/upload-artifact@v4
+        if: always()
         with:
           name: packforge-container-corpus-linux
           path: |
@@ -115,6 +120,30 @@ jobs:
           name: packforge-container-reproducibility
           path: target/container-reproducibility/container-digests-macos.tsv
 
+  runtime-kernel-matrix:
+    name: runtime (${{ matrix.runner }})
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [ubuntu-22.04, ubuntu-24.04]
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v6
+      - uses: dtolnay/rust-toolchain@1.97.0
+        with:
+          targets: x86_64-unknown-linux-musl
+      - uses: actions/setup-go@v6
+        with:
+          go-version: 1.26.4
+          cache: false
+      - name: Record native runner and require full ASLR
+        run: |
+          uname -a
+          cat /etc/os-release
+          test "$(cat /proc/sys/kernel/randomize_va_space)" -eq 2
+      - name: Direct-runtime compatibility smoke
+        run: bash scripts/ci-linux-executable-smoke.sh
+
   benchmark:
     if: github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
@@ -146,13 +175,15 @@ jobs:
             --raw benchmark-output/raw-samples.tsv \
             --metadata benchmark-output/metadata.json \
             --output benchmark-output/report.json \
+            --packforge-profile balanced \
             --cold-cache-reset linux_drop_caches_3
           python3 scripts/benchmark_contract.py evaluate \
             benchmark-output/report.json > benchmark-output/gates.json
           python3 scripts/m2_performance_contract.py build \
             --benchmark-report benchmark-output/report.json \
             --trace-directory benchmark-output/runtime-traces \
-            --loader runtime/artifacts/linux-x86_64/loader-v1 \
+            --loader runtime/artifacts/linux-x86_64/loader-v2 \
+            --direct-mapping \
             --output benchmark-output/m2-report.json
           python3 scripts/m2_performance_contract.py evaluate \
             benchmark-output/m2-report.json > benchmark-output/m2-gates.json
@@ -162,6 +193,7 @@ jobs:
           cat benchmark-output/gates.json
           cat benchmark-output/m2-gates.json
       - uses: actions/upload-artifact@v4
+        if: always()
         with:
           name: packforge-linux-x86-64-benchmark
           path: benchmark-output

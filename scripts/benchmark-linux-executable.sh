@@ -63,7 +63,7 @@ tar -xJf "$upx_archive" -C "$scratch"
 upx="$scratch/upx-$upx_version-amd64_linux/upx"
 test "$("$upx" --version | head -1)" = "upx $upx_version"
 
-"$workspace/scripts/build-runtime.sh" --check >/dev/null
+"$workspace/scripts/build-runtime-v2.sh" --check >/dev/null
 cargo build --release --locked -p packforge-cli >/dev/null
 
 cc -O2 -Wall -Wextra -Werror -static -no-pie \
@@ -185,9 +185,9 @@ for label in hello-c hello-cpp hello-rust hello-go; do
     upx_second="$scratch/$label.upx-second"
 
     "$packer" pack "$original" --output "$packforge" --artifact executable \
-        --profile fast --json >/dev/null
+        --profile balanced --json >/dev/null
     "$packer" pack "$original" --output "$packforge_second" --artifact executable \
-        --profile fast --json >/dev/null
+        --profile balanced --json >/dev/null
     cmp "$packforge" "$packforge_second"
     "$packer" unpack "$packforge" --output "$restored" --json >/dev/null
     cmp "$original" "$restored"

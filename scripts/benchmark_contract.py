@@ -337,7 +337,7 @@ def build_report(arguments: argparse.Namespace) -> dict[str, Any]:
         "schema_version": 1,
         **metadata,
         "configuration": {
-            "packforge_profile": "fast",
+            "packforge_profile": arguments.packforge_profile,
             "upx_mode": "--best",
             "warmup_iterations": 1,
             "warm_iterations": warm_iterations,
@@ -377,7 +377,12 @@ def validate_report(report: dict[str, Any]) -> None:
     configuration = report.get("configuration")
     if not isinstance(configuration, dict):
         raise ContractError("report configuration must be an object")
-    if configuration.get("packforge_profile") != "fast" or configuration.get("upx_mode") != "--best":
+    if configuration.get("packforge_profile") not in {
+        "fast",
+        "balanced",
+        "small",
+        "auto",
+    } or configuration.get("upx_mode") != "--best":
         raise ContractError("report has unsupported benchmark configuration")
     warm_iterations = configuration.get("warm_iterations")
     cold_iterations = configuration.get("cold_iterations")
@@ -494,6 +499,11 @@ def parser() -> argparse.ArgumentParser:
     report.add_argument("--raw", type=Path, required=True)
     report.add_argument("--metadata", type=Path, required=True)
     report.add_argument("--output", type=Path, required=True)
+    report.add_argument(
+        "--packforge-profile",
+        choices=("fast", "balanced", "small", "auto"),
+        default="fast",
+    )
     report.add_argument(
         "--cold-cache-reset",
         choices=("none", "linux_drop_caches_3"),

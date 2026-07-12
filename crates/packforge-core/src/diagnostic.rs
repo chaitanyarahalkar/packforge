@@ -1,6 +1,6 @@
 //! Stable error classes and diagnostic identifiers for automation.
 
-use crate::{ContainerError, Error, ExecutableError, FormatError};
+use crate::{ContainerError, Error, ExecutableError, ExecutableV2Error, FormatError};
 
 /// Broad failure class used to select a stable process exit status.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -166,6 +166,31 @@ impl ExecutableError {
     }
 }
 
+impl ExecutableV2Error {
+    /// Returns the stable diagnostic mapping for a direct-load wrapper failure.
+    #[must_use]
+    pub const fn diagnostic(&self) -> Diagnostic {
+        match self {
+            Self::ManifestElf(_)
+            | Self::UnsupportedProfile(_)
+            | Self::UnsupportedVersion(_)
+            | Self::InvalidStructureLength(_)
+            | Self::UnsupportedMetadata => Diagnostic::new("PFG1002", DiagnosticClass::Unsupported),
+            Self::NotBeneficial { .. } => Diagnostic::new("PFG1003", DiagnosticClass::Conflict),
+            Self::SizeOverflow(_) => Diagnostic::new("PFG3001", DiagnosticClass::ResourceLimit),
+            Self::Integrity(_)
+            | Self::Decompression(_)
+            | Self::TrailingBytes { .. }
+            | Self::ManifestMismatch => Diagnostic::new("PFG2002", DiagnosticClass::Corrupt),
+            Self::Manifest(_)
+            | Self::InvalidLoader
+            | Self::TruncatedTrailer
+            | Self::InvalidMagic
+            | Self::InvalidRange => Diagnostic::new("PFG2001", DiagnosticClass::Corrupt),
+        }
+    }
+}
+
 impl Error {
     /// Returns the stable diagnostic mapping for a host-side operation failure.
     #[must_use]
@@ -173,6 +198,7 @@ impl Error {
         match self {
             Self::Container(error) => error.diagnostic(),
             Self::Executable(error) => error.diagnostic(),
+            Self::ExecutableV2(error) => error.diagnostic(),
             Self::Io { .. } | Self::NotRegularFile(_) => {
                 Diagnostic::new("PFG4001", DiagnosticClass::Io)
             }

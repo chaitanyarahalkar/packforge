@@ -55,5 +55,12 @@ test = false
 doc = false
 bench = false
 
+[[bin]]
+name = "runtime_v2_format"
+path = "fuzz_targets/runtime_v2_format.rs"
+test = false
+doc = false
+bench = false
+
 [workspace]
 members = ["."]

@@ -71,6 +71,8 @@ pub enum Error {
     Container(ContainerError),
     /// Self-contained executable validation failed.
     Executable(ExecutableError),
+    /// Direct-load executable v2 validation failed.
+    ExecutableV2(ExecutableV2Error),
     /// A filesystem operation failed.
     Io {
         /// Operation being attempted.
@@ -95,6 +97,7 @@ impl fmt::Display for Error {
         match self {
             Self::Container(error) => error.fmt(formatter),
             Self::Executable(error) => error.fmt(formatter),
+            Self::ExecutableV2(error) => error.fmt(formatter),
             Self::Io {
                 operation,
                 path,
@@ -127,6 +130,7 @@ impl std::error::Error for Error {
         match self {
             Self::Container(error) => Some(error),
             Self::Executable(error) => Some(error),
+            Self::ExecutableV2(error) => Some(error),
             Self::Io { source, .. } => Some(source),
             Self::NotRegularFile(_)
             | Self::OutputExists(_)
@@ -148,6 +152,12 @@ impl From<ExecutableError> for Error {
     }
 }
 
+impl From<ExecutableV2Error> for Error {
+    fn from(error: ExecutableV2Error) -> Self {
+        Self::ExecutableV2(error)
+    }
+}
+
 /// Metadata returned by auto-detecting artifact operations.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 #[serde(tag = "artifact_kind", rename_all = "snake_case")]
@@ -163,6 +173,13 @@ pub enum ArtifactReport {
         /// Executable wrapper and embedded-container report fields.
         #[serde(flatten)]
         info: ExecutableInfo,
+    },
+    /// A direct-load native self-contained executable.
+    #[serde(rename = "executable")]
+    ExecutableV2 {
+        /// Direct-load wrapper, manifest, and payload report fields.
+        #[serde(flatten)]
+        info: ExecutableV2Info,
     },
 }
 
@@ -211,6 +228,27 @@ pub fn pack_executable_file(
     Ok(artifact.info)
 }
 
+/// Packs a supported executable into a direct-load native Linux artifact.
+///
+/// # Errors
+///
+/// Returns [`Error`] when input I/O, executable permissions, validation,
+/// compression, direct-loader wrapping, or atomic output creation fails.
+pub fn pack_executable_v2_file(
+    input_path: &Path,
+    output_path: &Path,
+    options: PackOptions,
+) -> Result<ExecutableV2Info, Error> {
+    let (input, metadata) = read_bounded(input_path, MAX_ORIGINAL_SIZE)?;
+    let original_mode = file_mode(&metadata);
+    if original_mode & 0o111 == 0 {
+        return Err(Error::InputNotExecutable(input_path.to_path_buf()));
+    }
+    let artifact = pack_executable_v2(&input, original_mode, options, LINUX_X86_64_RUNTIME_V2)?;
+    write_new(output_path, &artifact.bytes, original_mode & 0o777)?;
+    Ok(artifact.info)
+}
+
 /// Inspects either a recovery container or a self-contained executable.
 ///
 /// # Errors
@@ -218,13 +256,16 @@ pub fn pack_executable_file(
 /// Returns [`Error`] when the input cannot be read, its artifact kind is not
 /// recognized, or framing and compressed-payload validation fails.
 pub fn inspect_artifact_file(input_path: &Path) -> Result<ArtifactReport, Error> {
-    let (input, _) = read_bounded(input_path, MAX_EXECUTABLE_SIZE)?;
+    let (input, _) = read_bounded(input_path, MAX_EXECUTABLE_V2_SIZE)?;
     match detect_artifact(&input)? {
         ArtifactKind::Container => Ok(ArtifactReport::Container {
             info: inspect(&input)?,
         }),
-        ArtifactKind::Executable => Ok(ArtifactReport::Executable {
+        ArtifactKind::ExecutableV1 => Ok(ArtifactReport::Executable {
             info: inspect_executable(&input)?,
+        }),
+        ArtifactKind::ExecutableV2 => Ok(ArtifactReport::ExecutableV2 {
+            info: inspect_executable_v2(&input)?,
         }),
     }
 }
@@ -236,13 +277,16 @@ pub fn inspect_artifact_file(input_path: &Path) -> Result<ArtifactReport, Error>
 /// Returns [`Error`] when artifact detection, wrapper/container validation,
 /// decompression, digest validation, or metadata reclassification fails.
 pub fn verify_artifact_file(input_path: &Path) -> Result<ArtifactReport, Error> {
-    let (input, _) = read_bounded(input_path, MAX_EXECUTABLE_SIZE)?;
+    let (input, _) = read_bounded(input_path, MAX_EXECUTABLE_V2_SIZE)?;
     match detect_artifact(&input)? {
         ArtifactKind::Container => Ok(ArtifactReport::Container {
             info: verify(&input)?,
         }),
-        ArtifactKind::Executable => Ok(ArtifactReport::Executable {
+        ArtifactKind::ExecutableV1 => Ok(ArtifactReport::Executable {
             info: verify_executable(&input)?,
+        }),
+        ArtifactKind::ExecutableV2 => Ok(ArtifactReport::ExecutableV2 {
+            info: verify_executable_v2(&input)?,
         }),
     }
 }
@@ -257,7 +301,7 @@ pub fn unpack_artifact_file(
     input_path: &Path,
     output_path: &Path,
 ) -> Result<ArtifactReport, Error> {
-    let (input, _) = read_bounded(input_path, MAX_EXECUTABLE_SIZE)?;
+    let (input, _) = read_bounded(input_path, MAX_EXECUTABLE_V2_SIZE)?;
     match detect_artifact(&input)? {
         ArtifactKind::Container => {
             let artifact = unpack(&input)?;
@@ -267,11 +311,19 @@ pub fn unpack_artifact_file(
                 info: artifact.info,
             })
         }
-        ArtifactKind::Executable => {
+        ArtifactKind::ExecutableV1 => {
             let artifact = unpack_executable(&input)?;
             let mode = recovered_mode(artifact.info.container.original_mode);
             write_new(output_path, &artifact.bytes, mode)?;
             Ok(ArtifactReport::Executable {
+                info: artifact.info,
+            })
+        }
+        ArtifactKind::ExecutableV2 => {
+            let artifact = unpack_executable_v2(&input)?;
+            let mode = recovered_mode(artifact.info.original_mode);
+            write_new(output_path, &artifact.bytes, mode)?;
+            Ok(ArtifactReport::ExecutableV2 {
                 info: artifact.info,
             })
         }
@@ -321,7 +373,8 @@ pub fn unpack_file(input_path: &Path, output_path: &Path) -> Result<ArtifactInfo
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum ArtifactKind {
     Container,
-    Executable,
+    ExecutableV1,
+    ExecutableV2,
 }
 
 fn detect_artifact(input: &[u8]) -> Result<ArtifactKind, Error> {
@@ -334,7 +387,15 @@ fn detect_artifact(input: &[u8]) -> Result<ArtifactKind, Error> {
         .and_then(|offset| input.get(offset..offset + 8))
         == Some(b"PFGEXE01")
     {
-        return Ok(ArtifactKind::Executable);
+        return Ok(ArtifactKind::ExecutableV1);
+    }
+    if input
+        .len()
+        .checked_sub(EXECUTABLE_TRAILER_LEN)
+        .and_then(|offset| input.get(offset..offset + 8))
+        == Some(b"PFGEXE02")
+    {
+        return Ok(ArtifactKind::ExecutableV2);
     }
     Err(Error::UnknownArtifact)
 }

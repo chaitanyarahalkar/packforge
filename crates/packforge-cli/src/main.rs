@@ -8,7 +8,7 @@ use std::process::ExitCode;
 
 use clap::{Parser, Subcommand, ValueEnum};
 use packforge_core::{
-    ArtifactInfo, ArtifactReport, Diagnostic, Error as CoreError, ExecutableInfo,
+    ArtifactInfo, ArtifactReport, Diagnostic, Error as CoreError, ExecutableInfo, ExecutableV2Info,
     INTERNAL_DIAGNOSTIC, PackOptions, Profile,
 };
 
@@ -34,7 +34,7 @@ enum Command {
         /// Artifact kind; native executable output is opt-in during the runtime spike.
         #[arg(long, value_enum, default_value_t = CliArtifact::Container)]
         artifact: CliArtifact,
-        /// Size/startup policy; defaults to balanced for containers and fast for executables.
+        /// Size/startup policy; defaults to balanced.
         #[arg(long, value_enum)]
         profile: Option<CliProfile>,
         /// Keep the selected artifact even when it is not smaller than the input.
@@ -167,20 +167,16 @@ fn run(cli: Cli) -> Result<(), CliError> {
             json,
         } => {
             let output = output.unwrap_or_else(|| default_pack_output(&input, artifact));
-            let default_profile = match artifact {
-                CliArtifact::Container => Profile::Balanced,
-                CliArtifact::Executable => Profile::Fast,
-            };
             let options = PackOptions {
-                profile: profile.map_or(default_profile, Profile::from),
+                profile: profile.map_or(Profile::Balanced, Profile::from),
                 allow_larger,
             };
             let report = match artifact {
                 CliArtifact::Container => ArtifactReport::Container {
                     info: packforge_core::pack_file(&input, &output, options)?,
                 },
-                CliArtifact::Executable => ArtifactReport::Executable {
-                    info: packforge_core::pack_executable_file(&input, &output, options)?,
+                CliArtifact::Executable => ArtifactReport::ExecutableV2 {
+                    info: packforge_core::pack_executable_v2_file(&input, &output, options)?,
                 },
             };
             if json {
@@ -305,6 +301,7 @@ fn print_report(report: &ArtifactReport) {
             print_human(info);
         }
         ArtifactReport::Executable { info } => print_executable(info),
+        ArtifactReport::ExecutableV2 { info } => print_executable_v2(info),
     }
 }
 
@@ -316,6 +313,21 @@ fn print_executable(info: &ExecutableInfo) {
     println!("  executable    {} bytes", info.executable_size);
     println!("  loader hash   {}", info.loader_digest);
     print_human(&info.container);
+}
+
+fn print_executable_v2(info: &ExecutableV2Info) {
+    println!("  artifact      executable");
+    println!("  wrapper       v{}", info.executable_version);
+    println!("  runtime ABI   v{}", info.runtime_abi_version);
+    println!("  loader        {} bytes", info.loader_size);
+    println!("  manifest      {} bytes", info.manifest_size);
+    println!("  payload       {} bytes", info.payload_size);
+    println!("  original      {} bytes", info.original_size);
+    println!("  executable    {} bytes", info.executable_size);
+    println!("  loader hash   {}", info.loader_digest);
+    println!("  manifest hash {}", info.manifest_digest);
+    println!("  payload hash  {}", info.payload_digest);
+    println!("  original hash {}", info.original_digest);
 }
 
 fn default_pack_output(input: &Path, artifact: CliArtifact) -> PathBuf {

@@ -1,0 +1,192 @@
+{
+  "schema_version": 2,
+  "generated_at_utc": "2026-07-12T02:41:14.706419Z",
+  "source_commit": "f5b5e9e004f924b529ebc6498819c7aeaf68590d",
+  "source_run_url": "https://github.com/chaitanyarahalkar/packforge/actions/runs/29177085582",
+  "environment": {
+    "os": "Ubuntu 24.04.4 LTS",
+    "kernel": "6.17.0-1018-azure",
+    "architecture": "x86_64",
+    "cpu": "AMD EPYC 7763 64-Core Processor",
+    "runner": "GitHub Actions 1000025268"
+  },
+  "tools": {
+    "cc": "cc (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0",
+    "cpp": "c++ (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0",
+    "rustc": "rustc 1.97.0 (2d8144b78 2026-07-07)",
+    "go": "go version go1.26.4 linux/amd64",
+    "packforge": "packforge-cli 0.1.0",
+    "upx": "5.2.0"
+  },
+  "configuration": {
+    "packforge_profile": "balanced",
+    "upx_mode": "--best",
+    "warm_iterations": 21,
+    "cold_iterations": 7,
+    "cold_cache_reset": "linux_drop_caches_3"
+  },
+  "loader": {
+    "bytes": 17360,
+    "sha256": "4d8784c467785efdeab3a06038da888c7537d8d0165bbd71f9d651e5c574cd08",
+    "elf_type": "et_dyn",
+    "runtime_codec": "lzma1",
+    "max_decoder_memory_bytes": 2184137,
+    "direct_mapping": true
+  },
+  "fixtures": [
+    {
+      "id": "hello-c",
+      "packforge": {
+        "bytes": 296661,
+        "warm_time_ns": 35168881,
+        "cold_time_ns": 38075745,
+        "peak_rss_kib": 1792
+      },
+      "upx": {
+        "bytes": 308912,
+        "warm_time_ns": 7081968,
+        "cold_time_ns": 9754438,
+        "peak_rss_kib": 1736
+      },
+      "payload_bytes": 278749,
+      "decoder_memory_bytes": 1064053,
+      "size_packforge_over_upx_basis_points": 9603,
+      "cold_packforge_over_upx_basis_points": 39034,
+      "rss_packforge_over_upx_basis_points": 10322,
+      "behavior_matches_original": true,
+      "reversible": true,
+      "deterministic": true,
+      "syscalls": {
+        "execve": 1,
+        "execveat": 0,
+        "memfd_create": 0,
+        "mmap": 7,
+        "mprotect": 9,
+        "openat": 1,
+        "pread64": 5,
+        "write": 1
+      },
+      "phase_timings_ns": null
+    },
+    {
+      "id": "hello-cpp",
+      "packforge": {
+        "bytes": 296586,
+        "warm_time_ns": 35296206,
+        "cold_time_ns": 38077538,
+        "peak_rss_kib": 1792
+      },
+      "upx": {
+        "bytes": 308908,
+        "warm_time_ns": 7146254,
+        "cold_time_ns": 9796731,
+        "peak_rss_kib": 1736
+      },
+      "payload_bytes": 278674,
+      "decoder_memory_bytes": 1063978,
+      "size_packforge_over_upx_basis_points": 9601,
+      "cold_packforge_over_upx_basis_points": 38867,
+      "rss_packforge_over_upx_basis_points": 10322,
+      "behavior_matches_original": true,
+      "reversible": true,
+      "deterministic": true,
+      "syscalls": {
+        "execve": 1,
+        "execveat": 0,
+        "memfd_create": 0,
+        "mmap": 7,
+        "mprotect": 9,
+        "openat": 1,
+        "pread64": 5,
+        "write": 1
+      },
+      "phase_timings_ns": null
+    },
+    {
+      "id": "hello-rust",
+      "packforge": {
+        "bytes": 199330,
+        "warm_time_ns": 23079094,
+        "cold_time_ns": 25851560,
+        "peak_rss_kib": 1736
+      },
+      "upx": {
+        "bytes": 196196,
+        "warm_time_ns": 5447260,
+        "cold_time_ns": 8284318,
+        "peak_rss_kib": 1736
+      },
+      "payload_bytes": 181418,
+      "decoder_memory_bytes": 619818,
+      "size_packforge_over_upx_basis_points": 10159,
+      "cold_packforge_over_upx_basis_points": 31205,
+      "rss_packforge_over_upx_basis_points": 10000,
+      "behavior_matches_original": true,
+      "reversible": true,
+      "deterministic": true,
+      "syscalls": {
+        "execve": 1,
+        "execveat": 0,
+        "memfd_create": 0,
+        "mmap": 11,
+        "mprotect": 9,
+        "openat": 1,
+        "pread64": 5,
+        "write": 1
+      },
+      "phase_timings_ns": null
+    },
+    {
+      "id": "hello-go",
+      "packforge": {
+        "bytes": 604435,
+        "warm_time_ns": 75081945,
+        "cold_time_ns": 75740838,
+        "peak_rss_kib": 5864
+      },
+      "upx": {
+        "bytes": 653268,
+        "warm_time_ns": 12632871,
+        "cold_time_ns": 15211022,
+        "peak_rss_kib": 5816
+      },
+      "payload_bytes": 586571,
+      "decoder_memory_bytes": 2184137,
+      "size_packforge_over_upx_basis_points": 9252,
+      "cold_packforge_over_upx_basis_points": 49793,
+      "rss_packforge_over_upx_basis_points": 10082,
+      "behavior_matches_original": true,
+      "reversible": true,
+      "deterministic": true,
+      "syscalls": {
+        "execve": 1,
+        "execveat": 0,
+        "memfd_create": 0,
+        "mmap": 29,
+        "mprotect": 6,
+        "openat": 5,
+        "pread64": 7,
+        "write": 1
+      },
+      "phase_timings_ns": null
+    }
+  ],
+  "gates": {
+    "correctness_pass": true,
+    "reversibility_pass": true,
+    "determinism_pass": true,
+    "loader_size_limit_bytes": 23500,
+    "loader_size_pass": true,
+    "median_size_packforge_over_upx_basis_points": 9602,
+    "all_size_within_105_percent": true,
+    "size_win_pass": true,
+    "median_cold_packforge_over_upx_basis_points": 38950,
+    "cold_win_pass": false,
+    "median_rss_packforge_over_upx_basis_points": 10202,
+    "rss_pass": true,
+    "direct_mapping_pass": true,
+    "no_memfd_pass": true,
+    "no_secondary_exec_pass": true,
+    "release_pass": false
+  }
+}
