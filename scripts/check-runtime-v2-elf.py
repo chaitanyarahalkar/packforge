@@ -10,6 +10,7 @@ from pathlib import Path
 PT_LOAD = 1
 PT_DYNAMIC = 2
 PT_INTERP = 3
+PT_GNU_EH_FRAME = 0x6474E550
 PT_GNU_STACK = 0x6474E551
 PF_X = 1
 PF_W = 2
@@ -44,6 +45,8 @@ def validate(path: Path) -> None:
         kind, flags, offset, _, _, file_size, _, _ = struct.unpack("<IIQQQQQQ", program)
         if kind == PT_INTERP:
             raise ValueError("loader must not contain PT_INTERP")
+        if kind == PT_GNU_EH_FRAME:
+            raise ValueError("normalized loader must not retain unwind metadata")
         if kind == PT_LOAD:
             load_count += 1
             if flags & (PF_W | PF_X) == (PF_W | PF_X):

@@ -34,7 +34,7 @@ sysroot="$("$rustc_bin" --print sysroot)"
 host="$("$rustc_bin" -vV | awk '/^host:/ {print $2}')"
 objcopy="$sysroot/lib/rustlib/$host/bin/llvm-objcopy"
 
-rustflags='-C linker-flavor=ld.lld -C link-self-contained=no -C link-arg=-nostdlib -C link-arg=-pie -C link-arg=--no-dynamic-linker -C link-arg=--gc-sections -C link-arg=-z -C link-arg=noexecstack -C relocation-model=pic'
+rustflags='-C linker-flavor=ld.lld -C link-self-contained=no -C link-arg=-nostdlib -C link-arg=-pie -C link-arg=--no-dynamic-linker -C link-arg=--gc-sections -C link-arg=--no-eh-frame-hdr -C link-arg=-z -C link-arg=noexecstack -C relocation-model=pic -C force-unwind-tables=no'
 (cd "$runtime" && \
   CARGO_TARGET_DIR="$target_dir" RUSTC="$rustc_bin" RUSTFLAGS="$rustflags" \
   "$cargo_bin" build --release --locked --features lzma \
@@ -43,7 +43,8 @@ rustflags='-C linker-flavor=ld.lld -C link-self-contained=no -C link-arg=-nostdl
 raw_built="$target_dir/x86_64-unknown-linux-musl/release/packforge-runtime-v2-linux-x86-64"
 normalized="$(mktemp "${TMPDIR:-/tmp}/packforge-runtime-v2.XXXXXX")"
 trap 'rm -f "$normalized"' EXIT
-"$objcopy" --remove-section=.comment "$raw_built" "$normalized"
+"$objcopy" --remove-section=.comment --remove-section=.eh_frame \
+  "$raw_built" "$normalized"
 
 size="$(wc -c < "$normalized" | tr -d ' ')"
 if (( size > 23500 )); then
