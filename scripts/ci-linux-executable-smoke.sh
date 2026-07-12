@@ -128,6 +128,20 @@ fi
 file "$c_packed"
 readelf -h -l "$c_packed"
 
+c_inspect="$scratch/hello-c.inspect.json"
+"$packer" inspect "$c_packed" --json > "$c_inspect"
+codec="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["codec"])' \
+    "$c_inspect")"
+loader_size="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["loader_size"])' \
+    "$c_inspect")"
+if [[ "$codec" -eq 5 ]]; then
+    trailer_failure="packforge: codec-5 runtime failed"
+    payload_failure="$trailer_failure"
+else
+    trailer_failure="packforge: v2 metadata integrity failed"
+    payload_failure="packforge: v2 payload integrity failed"
+fi
+
 cp "$c_packed" "$corrupt_trailer"
 packed_size="$(stat -c %s "$c_packed")"
 trailer_field_offset="$((packed_size - 128 + 24))"
@@ -138,11 +152,9 @@ failure_output="$("$corrupt_trailer" round-trip 2>&1)"
 failure_status="$?"
 set -e
 test "$failure_status" -eq 127
-test "$failure_output" = "packforge: v2 metadata integrity failed"
+test "$failure_output" = "$trailer_failure"
 
 cp "$c_packed" "$corrupt_payload"
-loader_size="$(stat -c %s \
-    "$workspace/runtime/artifacts/linux-x86_64/loader-v2")"
 manifest_size="$("$packer" inspect "$c_packed" --json | \
     python3 -c 'import json,sys; print(json.load(sys.stdin)["manifest_size"])')"
 payload_offset="$((loader_size + 192 + manifest_size))"
@@ -153,6 +165,6 @@ failure_output="$("$corrupt_payload" round-trip 2>&1)"
 failure_status="$?"
 set -e
 test "$failure_status" -eq 127
-test "$failure_output" = "packforge: v2 payload integrity failed"
+test "$failure_output" = "$payload_failure"
 
 printf 'native executable differential smoke passed\n'
