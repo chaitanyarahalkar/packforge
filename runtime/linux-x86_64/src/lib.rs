@@ -7,9 +7,13 @@ extern crate std;
 pub mod hash;
 #[cfg(feature = "optimized-hash")]
 pub use packforge_runtime_hash as hash;
+#[cfg(feature = "lzma-asm")]
+pub mod bcj;
 pub mod lz4;
 #[cfg(feature = "lzma")]
 pub mod lzma;
+#[cfg(feature = "lzma-asm")]
+pub mod lzma_asm;
 pub mod procfd;
-#[cfg(feature = "lzma")]
+#[cfg(any(feature = "lzma", feature = "lzma-asm"))]
 pub mod v2_format;

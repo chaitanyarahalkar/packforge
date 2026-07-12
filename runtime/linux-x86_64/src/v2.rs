@@ -6,11 +6,14 @@ use core::panic::PanicInfo;
 use core::{ptr, slice};
 
 use packforge_runtime_linux_x86_64::hash;
+#[cfg(feature = "lzma")]
 use packforge_runtime_linux_x86_64::lzma;
 use packforge_runtime_linux_x86_64::v2_format::{
     self, ElfInfo, HEADER_LEN, MANIFEST_HEADER_LEN, MANIFEST_SEGMENT_LEN, MAX_SEGMENTS, Manifest,
     OutputLayout, Segment, TRAILER_LEN,
 };
+#[cfg(feature = "lzma-asm")]
+use packforge_runtime_linux_x86_64::{bcj, lzma_asm};
 
 const MAX_MANIFEST_LENGTH: usize = MANIFEST_HEADER_LEN + MAX_SEGMENTS * MANIFEST_SEGMENT_LEN;
 
@@ -164,7 +167,10 @@ unsafe fn run(
 
     let payload_length = usize::try_from(header.payload_length)
         .map_err(|_| b"packforge: v2 payload is too large\n" as &'static [u8])?;
-    let payload_mapping = map_writable(payload_length)
+    let payload_mapping_length = payload_length
+        .checked_add(21)
+        .ok_or(b"packforge: v2 payload is too large\n" as &'static [u8])?;
+    let payload_mapping = map_writable(payload_mapping_length)
         .ok_or(b"packforge: cannot allocate v2 payload\n" as &'static [u8])?;
     let payload = unsafe { slice::from_raw_parts_mut(payload_mapping, payload_length) };
     let payload_offset = manifest_offset
@@ -182,10 +188,46 @@ unsafe fn run(
     reserve_output(output_layout)?;
     let original_mapping = output_layout.file_start as *mut u8;
     let original = unsafe { slice::from_raw_parts_mut(original_mapping, original_length) };
-    let report = lzma::decompress(payload, &header.properties, original)
-        .map_err(|_| b"packforge: v2 LZMA1 decompression failed\n" as &'static [u8])?;
-    if report.trailing_bytes != header.trailing_bytes {
-        return Err(b"packforge: v2 LZMA1 framing failed\n");
+    match header.codec {
+        #[cfg(feature = "lzma")]
+        v2_format::CODEC_LZMA1 => {
+            let report = lzma::decompress(payload, &header.properties, original)
+                .map_err(|_| b"packforge: v2 LZMA1 decompression failed\n" as &'static [u8])?;
+            if report.trailing_bytes != header.trailing_bytes {
+                return Err(b"packforge: v2 LZMA1 framing failed\n");
+            }
+        }
+        #[cfg(feature = "lzma-asm")]
+        v2_format::CODEC_LZMA1_BCJ4 => {
+            let chunks = v2_format::parse_codec4_chunks(payload, original_length)
+                .map_err(format_error_message)?;
+            for chunk in chunks {
+                let compressed_end = chunk
+                    .compressed_offset
+                    .checked_add(chunk.compressed_length)
+                    .ok_or(b"packforge: invalid codec-4 range\n" as &'static [u8])?;
+                let decoded_end = chunk
+                    .decoded_offset
+                    .checked_add(chunk.decoded_length)
+                    .ok_or(b"packforge: invalid codec-4 range\n" as &'static [u8])?;
+                lzma_asm::decompress(
+                    payload
+                        .get(chunk.compressed_offset..compressed_end)
+                        .ok_or(b"packforge: invalid codec-4 range\n" as &'static [u8])?,
+                    original
+                        .get_mut(chunk.decoded_offset..decoded_end)
+                        .ok_or(b"packforge: invalid codec-4 range\n" as &'static [u8])?,
+                    header.properties,
+                    chunk.trailing_bytes,
+                )
+                .map_err(|()| {
+                    b"packforge: codec-4 LZMA1 decompression failed\n" as &'static [u8]
+                })?;
+            }
+            bcj::decode(original)
+                .map_err(|()| b"packforge: codec-4 BCJ decode failed\n" as &'static [u8])?;
+        }
+        _ => return Err(b"packforge: unsupported v2 codec\n"),
     }
     if hash::hash(original) != header.original_digest {
         return Err(b"packforge: v2 original integrity failed\n");
@@ -196,7 +238,7 @@ unsafe fn run(
     unsafe { rewrite_auxiliary_vector(stack, elf) }?;
 
     let _ = syscall1(SYS_CLOSE, self_fd);
-    let _ = syscall2(SYS_MUNMAP, payload_mapping as usize, payload_length);
+    let _ = syscall2(SYS_MUNMAP, payload_mapping as usize, payload_mapping_length);
     unsafe { transfer(stack, elf.entry_point as usize, rtld_fini) }
 }
 

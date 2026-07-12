@@ -11,6 +11,10 @@ pub const MAX_ORIGINAL_SIZE: u64 = 1 << 30;
 pub const MAX_PAYLOAD_SIZE: u64 = MAX_ORIGINAL_SIZE + (64 << 20);
 pub const MAX_LOADER_SIZE: u64 = 23_500;
 pub const PAGE_SIZE: u64 = 4096;
+pub const CODEC_LZMA1: u16 = 3;
+pub const CODEC_LZMA1_BCJ4: u16 = 4;
+pub const CODEC4_CHUNK_COUNT: usize = 4;
+pub const CODEC4_TABLE_LEN: usize = 128;
 
 const TRAILER_MAGIC: &[u8; 8] = b"PFGEXE02";
 const HEADER_MAGIC: &[u8; 8] = b"PFGIMG02";
@@ -49,6 +53,7 @@ pub struct Trailer {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Header {
+    pub codec: u16,
     pub properties: [u8; 5],
     pub trailing_bytes: u8,
     pub manifest_length: u64,
@@ -57,6 +62,15 @@ pub struct Header {
     pub original_digest: [u8; 32],
     pub manifest_digest: [u8; 32],
     pub payload_digest: [u8; 32],
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Codec4Chunk {
+    pub decoded_offset: usize,
+    pub decoded_length: usize,
+    pub compressed_offset: usize,
+    pub compressed_length: usize,
+    pub trailing_bytes: u8,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -165,17 +179,20 @@ pub fn parse_header(bytes: &[u8; HEADER_LEN]) -> Result<Header, Error> {
     let properties = [bytes[20], bytes[21], bytes[22], bytes[23], bytes[24]];
     let dictionary =
         u32::from_le_bytes([properties[1], properties[2], properties[3], properties[4]]);
-    if get_u16(bytes, 12) != 3
+    let codec = get_u16(bytes, 12);
+    if !matches!(codec, CODEC_LZMA1 | CODEC_LZMA1_BCJ4)
         || get_u16(bytes, 14) != 0
         || bytes[26..32].iter().any(|byte| *byte != 0)
         || bytes[56..64].iter().any(|byte| *byte != 0)
         || properties[0] != FIXED_LZMA_PROPERTIES
         || !(MIN_DICTIONARY_SIZE..=MAX_DICTIONARY_SIZE).contains(&dictionary)
-        || bytes[25] > 5
+        || (codec == CODEC_LZMA1 && bytes[25] > 5)
+        || (codec == CODEC_LZMA1_BCJ4 && bytes[25] != 0)
     {
         return Err(Error::Metadata);
     }
     let header = Header {
+        codec,
         properties,
         trailing_bytes: bytes[25],
         manifest_length: get_u64(bytes, 32),
@@ -196,6 +213,62 @@ pub fn parse_header(bytes: &[u8; HEADER_LEN]) -> Result<Header, Error> {
         return Err(Error::Range);
     }
     Ok(header)
+}
+
+pub fn parse_codec4_chunks(
+    payload: &[u8],
+    original_length: usize,
+) -> Result<[Codec4Chunk; CODEC4_CHUNK_COUNT], Error> {
+    const ENTRY_LEN: usize = CODEC4_TABLE_LEN / CODEC4_CHUNK_COUNT;
+    const TRAILING_SHIFT: u32 = 56;
+    const LENGTH_MASK: u64 = (1u64 << TRAILING_SHIFT) - 1;
+    if payload.len() <= CODEC4_TABLE_LEN {
+        return Err(Error::Range);
+    }
+    let maximum_chunk = original_length
+        .checked_mul(28)
+        .and_then(|value| value.checked_add(99))
+        .map(|value| value / 100)
+        .ok_or(Error::Range)?;
+    let mut expected_decoded = 0usize;
+    let mut expected_compressed = CODEC4_TABLE_LEN;
+    let mut chunks = [Codec4Chunk {
+        decoded_offset: 0,
+        decoded_length: 0,
+        compressed_offset: 0,
+        compressed_length: 0,
+        trailing_bytes: 0,
+    }; CODEC4_CHUNK_COUNT];
+    for (index, chunk) in chunks.iter_mut().enumerate() {
+        let offset = index * ENTRY_LEN;
+        let encoded_length = get_u64(payload, offset + 8);
+        *chunk = Codec4Chunk {
+            decoded_offset: to_usize(get_u64(payload, offset))?,
+            decoded_length: to_usize(encoded_length & LENGTH_MASK)?,
+            compressed_offset: to_usize(get_u64(payload, offset + 16))?,
+            compressed_length: to_usize(get_u64(payload, offset + 24))?,
+            trailing_bytes: (encoded_length >> TRAILING_SHIFT) as u8,
+        };
+        if chunk.decoded_offset != expected_decoded
+            || chunk.compressed_offset != expected_compressed
+            || chunk.decoded_length == 0
+            || chunk.decoded_length > maximum_chunk
+            || chunk.compressed_length == 0
+            || chunk.trailing_bytes > 5
+        {
+            return Err(Error::Range);
+        }
+        expected_decoded = expected_decoded
+            .checked_add(chunk.decoded_length)
+            .ok_or(Error::Range)?;
+        expected_compressed = expected_compressed
+            .checked_add(chunk.compressed_length)
+            .ok_or(Error::Range)?;
+    }
+    if expected_decoded != original_length || expected_compressed != payload.len() {
+        return Err(Error::Range);
+    }
+    Ok(chunks)
 }
 
 pub fn validate_image_layout(trailer: &Trailer, header: &Header) -> Result<(), Error> {
@@ -491,6 +564,10 @@ fn get_u64(input: &[u8], offset: usize) -> u64 {
     ])
 }
 
+fn to_usize(value: u64) -> Result<usize, Error> {
+    usize::try_from(value).map_err(|_| Error::Range)
+}
+
 fn array_32(input: &[u8], offset: usize) -> [u8; 32] {
     let mut output = [0u8; 32];
     output.copy_from_slice(&input[offset..offset + 32]);
@@ -535,10 +612,9 @@ mod tests {
         manifest[14..16].copy_from_slice(&2u16.to_le_bytes());
         manifest[24..32].copy_from_slice(&0x3000u64.to_le_bytes());
         manifest[32..40].copy_from_slice(&0x400100u64.to_le_bytes());
-        for (index, (file, address, flags)) in
-            [(0u64, 0x400000u64, 5u32), (0x2000, 0x402000, 4)]
-                .into_iter()
-                .enumerate()
+        for (index, (file, address, flags)) in [(0u64, 0x400000u64, 5u32), (0x2000, 0x402000, 4)]
+            .into_iter()
+            .enumerate()
         {
             let offset = MANIFEST_HEADER_LEN + index * MANIFEST_SEGMENT_LEN;
             manifest[offset..offset + 8].copy_from_slice(&file.to_le_bytes());

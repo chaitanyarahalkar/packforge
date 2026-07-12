@@ -259,6 +259,20 @@ pub fn pack_executable_v2(
     pack_executable_v2_with_codec(original, original_mode, options, loader, CODEC_LZMA1)
 }
 
+/// Packs codec 4 with an explicitly supplied candidate loader for M2 validation.
+///
+/// This entry point is intentionally excluded from the released CLI selection
+/// until the assembly runtime passes every M2 gate.
+#[doc(hidden)]
+pub fn pack_executable_v2_codec4(
+    original: &[u8],
+    original_mode: u32,
+    options: PackOptions,
+    loader: &[u8],
+) -> Result<PackedExecutableV2, ExecutableV2Error> {
+    pack_executable_v2_with_codec(original, original_mode, options, loader, CODEC_LZMA1_BCJ4)
+}
+
 fn pack_executable_v2_with_codec(
     original: &[u8],
     original_mode: u32,

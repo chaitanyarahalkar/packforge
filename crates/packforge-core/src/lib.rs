@@ -33,7 +33,7 @@ pub use executable_v2::{
     EXECUTABLE_V2_HEADER_LEN, EXECUTABLE_V2_VERSION, ExecutableV2Error, ExecutableV2Info,
     LINUX_X86_64_RUNTIME_V2, MAX_EXECUTABLE_V2_SIZE, MAX_RUNTIME_V2_SIZE, PackedExecutableV2,
     RUNTIME_V2_ABI_VERSION, UnpackedExecutableV2, inspect_executable_v2, pack_executable_v2,
-    unpack_executable_v2, verify_executable_v2,
+    pack_executable_v2_codec4, unpack_executable_v2, verify_executable_v2,
 };
 pub use format::{
     Architecture, BinaryClass, BinaryFormat, BinaryInfo, BinaryType, Endianness, FormatError,

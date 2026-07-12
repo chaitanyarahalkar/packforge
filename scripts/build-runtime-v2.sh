@@ -9,6 +9,7 @@ mode="${1:---check}"
 opt_level="${PACKFORGE_RUNTIME_V2_OPT_LEVEL:-z}"
 relocation_model="${PACKFORGE_RUNTIME_V2_RELOCATION_MODEL:-pic}"
 decoder_opt_level="${PACKFORGE_RUNTIME_V2_DECODER_OPT_LEVEL-3}"
+decoder_implementation="${PACKFORGE_RUNTIME_V2_DECODER:-rust}"
 hash_implementation="${PACKFORGE_RUNTIME_V2_HASH:-compact-opt2}"
 
 case "$mode" in
@@ -53,6 +54,16 @@ case "$hash_implementation" in
     exit 2
     ;;
 esac
+runtime_features="runtime-v2,$runtime_features"
+
+case "$decoder_implementation" in
+  rust) ;;
+  asm) runtime_features="${runtime_features/lzma/lzma-asm}" ;;
+  *)
+    printf 'PACKFORGE_RUNTIME_V2_DECODER must be rust or asm\n' >&2
+    exit 2
+    ;;
+esac
 
 if [[ "$mode" == "--candidate" && -z "${PACKFORGE_RUNTIME_V2_OUTPUT:-}" ]]; then
   printf 'PACKFORGE_RUNTIME_V2_OUTPUT is required with --candidate\n' >&2
@@ -79,6 +90,23 @@ host="$("$rustc_bin" -vV | awk '/^host:/ {print $2}')"
 objcopy="$sysroot/lib/rustlib/$host/bin/llvm-objcopy"
 
 rustflags="-C linker-flavor=ld.lld -C link-self-contained=no -C link-arg=-nostdlib -C link-arg=-static -C link-arg=-pie -C link-arg=--no-dynamic-linker -C link-arg=-Bsymbolic -C link-arg=--gc-sections -C link-arg=--sort-section=name -C link-arg=--no-eh-frame-hdr -C link-arg=-z -C link-arg=noexecstack -C relocation-model=$relocation_model -C force-unwind-tables=no"
+if [[ "$decoder_implementation" == "asm" ]]; then
+  asm_object="$target_dir/LzmaDecOpt.o"
+  mkdir -p "$target_dir"
+  if ! base64 --decode "$workspace/runtime/third_party/7zip/LzmaDecOpt.o.b64" > "$asm_object" 2>/dev/null; then
+    base64 -D -i "$workspace/runtime/third_party/7zip/LzmaDecOpt.o.b64" -o "$asm_object"
+  fi
+  actual_asm_digest="$(shasum -a 256 "$asm_object" | awk '{print $1}')"
+  expected_asm_digest="3441d63c9e32ed3c89ecc2a79ec1f72c29924ede24b385d1d1d6c32e501962c8"
+  if [[ "$actual_asm_digest" != "$expected_asm_digest" ]]; then
+    printf 'runtime v2 assembly object checksum mismatch\n' >&2
+    exit 1
+  fi
+  asm_link_object="$target_dir/LzmaDecOpt.hidden.o"
+  "$objcopy" --set-symbol-visibility=LzmaDec_DecodeReal_3=hidden \
+    "$asm_object" "$asm_link_object"
+  rustflags="$rustflags -C link-arg=$asm_link_object"
+fi
 cargo_arguments=(
   build --release --locked --features "$runtime_features"
   --bin packforge-runtime-v2-linux-x86-64
@@ -146,6 +174,6 @@ elif [[ "$mode" == "--check" ]]; then
   fi
 fi
 
-printf 'runtime v2 artifact verified: opt=%s decoder-opt=%s hash=%s relocation=%s size=%s bytes sha256=%s\n' \
-  "$opt_level" "${decoder_opt_level:-inherit}" "$hash_implementation" \
+printf 'runtime v2 artifact verified: opt=%s decoder=%s decoder-opt=%s hash=%s relocation=%s size=%s bytes sha256=%s\n' \
+  "$opt_level" "$decoder_implementation" "${decoder_opt_level:-inherit}" "$hash_implementation" \
   "$relocation_model" "$size" "$digest"
