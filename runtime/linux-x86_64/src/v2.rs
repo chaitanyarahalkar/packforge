@@ -80,6 +80,8 @@ _start:
 );
 
 #[panic_handler]
+#[cold]
+#[inline(never)]
 fn panic(_info: &PanicInfo<'_>) -> ! {
     fail(b"packforge: v2 runtime panic\n")
 }
