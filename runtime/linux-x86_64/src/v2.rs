@@ -26,6 +26,9 @@ fn panic(_info: &PanicInfo<'_>) -> ! {
 }
 
 #[unsafe(no_mangle)]
+extern "C" fn rust_eh_personality() {}
+
+#[unsafe(no_mangle)]
 extern "C" fn runtime_main(_stack: *const usize, _rtld_fini: usize) -> ! {
     let decoder: fn(
         &[u8],
@@ -39,6 +42,7 @@ extern "C" fn runtime_main(_stack: *const usize, _rtld_fini: usize) -> ! {
     fail(b"packforge: v2 runtime is not integrated\n")
 }
 
+#[inline(always)]
 fn fail(message: &[u8]) -> ! {
     unsafe {
         let _ = syscall3(1, 2, message.as_ptr() as usize, message.len());
@@ -47,6 +51,7 @@ fn fail(message: &[u8]) -> ! {
     }
 }
 
+#[inline(always)]
 unsafe fn syscall3(number: usize, first: usize, second: usize, third: usize) -> isize {
     let result: isize;
     unsafe {
