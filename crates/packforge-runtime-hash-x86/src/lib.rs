@@ -2,6 +2,11 @@
 
 #![no_std]
 #![allow(unsafe_op_in_unsafe_fn)]
+#![allow(
+    clippy::cast_possible_truncation,
+    clippy::cast_possible_wrap,
+    clippy::cast_ptr_alignment
+)]
 
 #[cfg(target_arch = "x86_64")]
 use core::arch::x86_64::{
