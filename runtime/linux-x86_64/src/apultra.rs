@@ -159,13 +159,6 @@ fn copy_match(
     if end > output.len() {
         return Err(Error::Output);
     }
-    if offset >= 16 {
-        while end - *position >= 16 {
-            let source = *position - offset;
-            output.copy_within(source..source + 16, *position);
-            *position += 16;
-        }
-    }
     while *position < end {
         let source = *position - offset;
         output[*position] = output[source];

@@ -6,7 +6,7 @@ scratch="$(mktemp -d "${TMPDIR:-/tmp}/packforge-codec5.XXXXXX")"
 trap 'rm -rf "$scratch"' EXIT
 
 PACKFORGE_RUNTIME_V2_DECODER=apultra-bcj2 \
-PACKFORGE_RUNTIME_V2_DECODER_OPT_LEVEL=1 \
+PACKFORGE_RUNTIME_V2_DECODER_OPT_LEVEL=2 \
 PACKFORGE_RUNTIME_V2_HASH=compact-optz \
 PACKFORGE_RUNTIME_V2_OUTPUT="$scratch/loader-v2-codec5" \
     "$workspace/scripts/build-runtime-v2.sh" --candidate

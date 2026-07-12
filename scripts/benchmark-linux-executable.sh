@@ -357,7 +357,7 @@ for label in hello-c hello-cpp hello-rust hello-go; do
         IFS=$'\t' read -r apultra_rust_main apultra_rust_call \
             apultra_rust_jump apultra_rust_bcj2 <<< "$(cargo run --quiet \
                 --release --locked \
-                --config 'profile.release.package.packforge-codec5-decoder.opt-level=1' \
+                --config 'profile.release.package.packforge-codec5-decoder.opt-level=2' \
                 -p packforge-codec5-decoder --example m2_codec5_profile -- \
                 "$apultra_runtime" "$apultra_prefix" 21)"
         apultra_manifest_size="$(python3 -c \

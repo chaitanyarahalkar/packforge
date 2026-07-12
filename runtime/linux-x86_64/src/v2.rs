@@ -56,7 +56,7 @@ const AUX_REQUIRED: u8 = 0x0f;
 static PANIC_MESSAGE: [u8; 28] = *b"packforge: v2 runtime panic\n";
 
 #[cfg(feature = "apultra-bcj2")]
-const CODEC5_ERROR: &[u8] = b"packforge failed\n";
+const CODEC5_ERROR: &[u8] = b"packforge: codec-5 runtime failed\n";
 
 macro_rules! runtime_message {
     ($message:expr) => {{
