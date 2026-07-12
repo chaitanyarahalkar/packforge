@@ -5,6 +5,7 @@ use std::fmt;
 use serde::Serialize;
 
 use crate::MAX_ORIGINAL_SIZE;
+use crate::format::{FormatError, classify_with_load_segments};
 
 /// Manifest format version established by M0.
 pub const MANIFEST_VERSION: u16 = 0;
@@ -79,6 +80,45 @@ pub enum ManifestError {
     MemoryLimitExceeded(u64),
     /// A checked size calculation overflowed.
     SizeOverflow,
+}
+
+/// Errors produced while deriving a canonical manifest from an ELF executable.
+#[derive(Debug)]
+pub enum ManifestElfError {
+    /// The source executable is outside the supported ELF compatibility tier.
+    Format(FormatError),
+    /// The derived segment description violates manifest v0 bounds.
+    Manifest(ManifestError),
+}
+
+impl fmt::Display for ManifestElfError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Format(error) => error.fmt(formatter),
+            Self::Manifest(error) => error.fmt(formatter),
+        }
+    }
+}
+
+impl std::error::Error for ManifestElfError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::Format(error) => Some(error),
+            Self::Manifest(error) => Some(error),
+        }
+    }
+}
+
+impl From<FormatError> for ManifestElfError {
+    fn from(error: FormatError) -> Self {
+        Self::Format(error)
+    }
+}
+
+impl From<ManifestError> for ManifestElfError {
+    fn from(error: ManifestError) -> Self {
+        Self::Manifest(error)
+    }
 }
 
 impl fmt::Display for ManifestError {
@@ -191,6 +231,33 @@ impl ManifestV0 {
         }
         Ok(())
     }
+}
+
+/// Derives manifest v0 from every validated `PT_LOAD` record in source order.
+///
+/// # Errors
+///
+/// Returns [`ManifestElfError`] when the source is outside the supported static
+/// ELF64 x86-64 tier or its load description exceeds manifest v0 bounds.
+pub fn manifest_from_elf(input: &[u8]) -> Result<ManifestV0, ManifestElfError> {
+    let (binary, load_segments) = classify_with_load_segments(input)?;
+    let manifest = ManifestV0 {
+        original_size: u64::try_from(input.len()).map_err(|_| ManifestError::SizeOverflow)?,
+        entry_point: binary.entry_point,
+        segments: load_segments
+            .into_iter()
+            .map(|segment| ManifestSegment {
+                file_offset: segment.file_offset,
+                file_size: segment.file_size,
+                virtual_address: segment.virtual_address,
+                memory_size: segment.memory_size,
+                alignment: segment.alignment,
+                flags: segment.flags,
+            })
+            .collect(),
+    };
+    manifest.validate()?;
+    Ok(manifest)
 }
 
 /// Decodes and validates an exact manifest v0 byte sequence.
@@ -330,8 +397,32 @@ fn get_u64(input: &[u8], offset: usize) -> Result<u64, ManifestError> {
 mod tests {
     use super::{
         MANIFEST_HEADER_LEN, MANIFEST_SEGMENT_LEN, ManifestError, ManifestSegment, ManifestV0,
-        decode_manifest_v0,
+        decode_manifest_v0, manifest_from_elf,
     };
+
+    fn elf_fixture() -> Vec<u8> {
+        let mut bytes = vec![0u8; 4_096];
+        bytes[..4].copy_from_slice(b"\x7fELF");
+        bytes[4] = 2;
+        bytes[5] = 1;
+        bytes[6] = 1;
+        bytes[16..18].copy_from_slice(&2u16.to_le_bytes());
+        bytes[18..20].copy_from_slice(&62u16.to_le_bytes());
+        bytes[20..24].copy_from_slice(&1u32.to_le_bytes());
+        bytes[24..32].copy_from_slice(&0x40_1000u64.to_le_bytes());
+        bytes[32..40].copy_from_slice(&64u64.to_le_bytes());
+        bytes[52..54].copy_from_slice(&64u16.to_le_bytes());
+        bytes[54..56].copy_from_slice(&56u16.to_le_bytes());
+        bytes[56..58].copy_from_slice(&1u16.to_le_bytes());
+        bytes[64..68].copy_from_slice(&1u32.to_le_bytes());
+        bytes[68..72].copy_from_slice(&5u32.to_le_bytes());
+        bytes[72..80].copy_from_slice(&0u64.to_le_bytes());
+        bytes[80..88].copy_from_slice(&0x40_0000u64.to_le_bytes());
+        bytes[96..104].copy_from_slice(&4_096u64.to_le_bytes());
+        bytes[104..112].copy_from_slice(&4_096u64.to_le_bytes());
+        bytes[112..120].copy_from_slice(&4_096u64.to_le_bytes());
+        bytes
+    }
 
     fn manifest() -> ManifestV0 {
         ManifestV0 {
@@ -366,6 +457,21 @@ mod tests {
         assert_eq!(first, second);
         assert_eq!(first.len(), MANIFEST_HEADER_LEN + 2 * MANIFEST_SEGMENT_LEN);
         assert_eq!(decode_manifest_v0(&first).unwrap(), manifest);
+    }
+
+    #[test]
+    fn derives_canonical_manifest_from_elf_program_headers() {
+        let input = elf_fixture();
+        let manifest = manifest_from_elf(&input).unwrap();
+        assert_eq!(manifest.original_size, 4_096);
+        assert_eq!(manifest.entry_point, 0x40_1000);
+        assert_eq!(manifest.segments.len(), 1);
+        assert_eq!(manifest.segments[0].virtual_address, 0x40_0000);
+        assert_eq!(manifest.segments[0].flags, 5);
+        assert_eq!(
+            decode_manifest_v0(&manifest.encode().unwrap()).unwrap(),
+            manifest
+        );
     }
 
     #[test]

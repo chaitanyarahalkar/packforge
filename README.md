@@ -93,6 +93,25 @@ not cold-start or universal performance claims. See the
 [complete method](docs/BENCHMARKING.md) and the
 [source CI run](https://github.com/chaitanyarahalkar/packforge/actions/runs/29171498154).
 
+### M2 size candidate
+
+The admitted raw-LZMA1 candidate now passes the pre-integration size gate on the
+same four fixtures. This projection includes the complete 14,776-byte
+feature-retained loader, the 192-byte v2 image header, actual manifest v0 size,
+and the 128-byte trailer.
+
+| Fixture | Projected Packforge v2 | UPX 5.2.0 `--best` | Packforge/UPX |
+| --- | ---: | ---: | ---: |
+| C | 294,077 B | 308,912 B | 95.19% |
+| C++ | 294,002 B | 308,908 B | 95.17% |
+| Rust | 196,746 B | 196,196 B | 100.28% |
+| Go | 601,851 B | 653,268 B | 92.13% |
+
+Median projected size is 95.18% of UPX and every fixture is below the 105% hard
+bound. This is a reproducible feasibility result, not a release benchmark: v2
+must still integrate the direct loader and beat UPX in measured cold startup.
+See the [native gate run](https://github.com/chaitanyarahalkar/packforge/actions/runs/29174191514).
+
 ## Project boundaries
 
 The first production target is a reversible ELF packer for trusted, first-party
@@ -103,6 +122,7 @@ See the [product plan](docs/PRODUCT.md), [architecture](docs/ARCHITECTURE.md),
 [container format](docs/CONTAINER_FORMAT.md), [roadmap](docs/ROADMAP.md),
 [segment manifest](docs/MANIFEST_FORMAT.md),
 [self-contained executable format](docs/EXECUTABLE_FORMAT.md),
+[direct-load executable v2 format](docs/EXECUTABLE_FORMAT_V2.md),
 [CLI diagnostics](docs/DIAGNOSTICS.md),
 [runtime spike](docs/RUNTIME_SPIKE.md), [benchmark method](docs/BENCHMARKING.md),
 [M2 performance plan](docs/plans/M2.md), and [security policy](SECURITY.md).

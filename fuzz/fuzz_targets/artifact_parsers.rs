@@ -7,4 +7,5 @@ fuzz_target!(|input: &[u8]| {
     let _ = packforge_core::verify(input);
     let _ = packforge_core::inspect_executable(input);
     let _ = packforge_core::verify_executable(input);
+    let _ = packforge_core::inspect_executable_v2(input);
 });

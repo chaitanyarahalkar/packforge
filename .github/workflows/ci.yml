@@ -61,6 +61,14 @@ jobs:
           PACKFORGE_CONTAINER_DIGESTS: target/container-corpus/container-digests-linux.tsv
           PACKFORGE_CORPUS_OUTPUT: target/container-corpus/inputs
         run: bash scripts/ci-linux-smoke.sh
+      - name: Executable v2 host round trip
+        run: |
+          cargo run --release --locked -p packforge-core \
+            --example v2_host_roundtrip -- \
+            target/container-corpus/inputs/hello-c \
+            target/container-corpus/inputs/hello-cpp \
+            target/container-corpus/inputs/hello-rust \
+            target/container-corpus/inputs/hello-go
       - name: Self-contained executable round trip
         run: bash scripts/ci-linux-executable-smoke.sh
       - name: Archive deterministic container corpus

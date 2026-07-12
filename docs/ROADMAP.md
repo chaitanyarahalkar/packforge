@@ -41,20 +41,23 @@ containers fail closed.
 
 ## M2 — Linux ELF x86-64 static executables
 
-**Status: implementation plan complete; optimization next.** The fixed executable trailer, host-side
+**Status: in progress.** The fixed v1 executable trailer, host-side
 wrapping/inspection/verification/recovery path, freestanding LZ4 runtime, and
 native Linux CI smoke gate are implemented. Static C, C++, Rust/musl, and Go
 fixtures pass byte-identical recovery and execution equivalence; the behavioral
-fixture also covers cwd, inherited descriptors, output, file effects, status, and
-signals. Native kernel-matrix and performance gates remain before executable
-output becomes the default. The `ruzstd` 0.8.3 experiment decoded the balanced
-payload correctly but added 59,936 bytes over its static I/O baseline, so it was
-rejected for the 32 KiB M2 loader budget rather than integrated.
+fixture also covers cwd, inherited descriptors, output, file effects, status,
+and signals. Native kernel-matrix and final performance gates remain before
+executable output becomes the default. The `ruzstd` 0.8.3 experiment decoded the
+balanced payload correctly but added 59,936 bytes over its static I/O baseline,
+so it was rejected rather than integrated.
 
 The performance-first v2 design, 23,500-byte compact-codec go/no-go budget,
 direct in-process ELF mapping sequence, and strict requirement to beat UPX in
 both median size and cold startup are specified in `plans/M2.md` before further
-runtime changes.
+runtime changes. The admitted raw-LZMA1 candidate produces a 14,776-byte
+feature-retained loader and passes the pinned native projection at 95.18% median
+size versus UPX, with every fixture within 105%. Executable v2 framing and
+canonical manifest host round trips are now under implementation.
 
 - Implement the smallest native runtime stub.
 - Support a documented static, non-PIE `ET_EXEC` subset.

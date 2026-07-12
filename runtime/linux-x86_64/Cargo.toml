@@ -4,8 +4,12 @@ version = "0.1.0"
 edition = "2024"
 publish = false
 
+[dependencies]
+packforge-lzma-decoder = { path = "../../crates/packforge-lzma-decoder", optional = true }
+
 [features]
-lzma-size-spike = []
+lzma = ["dep:packforge-lzma-decoder"]
+lzma-size-spike = ["lzma"]
 
 [[bin]]
 name = "packforge-runtime-linux-x86-64"

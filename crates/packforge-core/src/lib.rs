@@ -6,6 +6,7 @@ mod benchmark;
 mod container;
 mod diagnostic;
 mod executable;
+mod executable_v2;
 mod format;
 mod manifest;
 
@@ -27,13 +28,20 @@ pub use executable::{
     RUNTIME_ABI_VERSION, UnpackedExecutable, inspect_executable, pack_executable,
     unpack_executable, verify_executable,
 };
+pub use executable_v2::{
+    EXECUTABLE_V2_HEADER_LEN, EXECUTABLE_V2_VERSION, ExecutableV2Error, ExecutableV2Info,
+    MAX_EXECUTABLE_V2_SIZE, MAX_RUNTIME_V2_SIZE, PackedExecutableV2, RUNTIME_V2_ABI_VERSION,
+    UnpackedExecutableV2, inspect_executable_v2, pack_executable_v2, unpack_executable_v2,
+    verify_executable_v2,
+};
 pub use format::{
     Architecture, BinaryClass, BinaryFormat, BinaryInfo, BinaryType, Endianness, FormatError,
     classify,
 };
 pub use manifest::{
     MANIFEST_HEADER_LEN, MANIFEST_SEGMENT_LEN, MANIFEST_VERSION, MAX_MANIFEST_MEMORY_SIZE,
-    MAX_MANIFEST_SEGMENTS, ManifestError, ManifestSegment, ManifestV0, decode_manifest_v0,
+    MAX_MANIFEST_SEGMENTS, ManifestElfError, ManifestError, ManifestSegment, ManifestV0,
+    decode_manifest_v0, manifest_from_elf,
 };
 
 /// The current implementation stage.

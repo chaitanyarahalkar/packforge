@@ -12,8 +12,9 @@ cargo fuzz run runtime_lzma -- -max_len=1048576
 cargo fuzz run runtime_hash -- -max_len=1048576
 ```
 
-`artifact_parsers` covers standalone container and executable-wrapper framing at
-both inspection and full-verification depth. `container_decompressor` rebuilds a
+`artifact_parsers` covers standalone container and v1/v2 executable-wrapper
+framing; v1 runs at both inspection and full-verification depth while v2 uses
+bounded inspection because decompression has its own harness. `container_decompressor` rebuilds a
 valid integrity envelope around arbitrary LZ4/Zstandard bytes and caps the
 declared output at 1 MiB, allowing mutations to reach the decoder instead of
 stopping at header hashes. `runtime_lz4` independently exercises the freestanding

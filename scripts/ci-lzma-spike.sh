@@ -101,7 +101,15 @@ for fixture in hello-c hello-cpp hello-rust hello-go; do
     exit 1
   fi
   manifest_size="$((40 + load_segments * 48))"
-  payload_size="$(stat -c %s "$payload")"
+  encoded_size="$(stat -c %s "$payload")"
+  if (( encoded_size <= 5 )); then
+    printf '%s produced an invalid property-plus-payload length %s\n' \
+      "$fixture" "$encoded_size" >&2
+    exit 1
+  fi
+  # The spike output prefixes five property bytes. V2 stores them in its fixed
+  # header, so only the raw range-coded bytes contribute to payload length.
+  payload_size="$((encoded_size - 5))"
   projected_size="$((loader_size + fixed_header_bytes + payload_size + manifest_size + trailer_bytes))"
   upx_size="$(stat -c %s "$upx_packed")"
   ratio_bp="$((projected_size * 10000 / upx_size))"

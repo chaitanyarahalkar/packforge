@@ -17,6 +17,16 @@ const PROGRAM_TYPE_DYNAMIC: u32 = 2;
 const PROGRAM_TYPE_INTERPRETER: u32 = 3;
 const PROGRAM_TYPE_LOAD: u32 = 1;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct LoadSegment {
+    pub(crate) file_offset: u64,
+    pub(crate) file_size: u64,
+    pub(crate) virtual_address: u64,
+    pub(crate) memory_size: u64,
+    pub(crate) alignment: u64,
+    pub(crate) flags: u32,
+}
+
 /// The executable format recognized by the current compatibility tier.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -184,6 +194,12 @@ impl std::error::Error for FormatError {}
 /// Returns [`FormatError`] when the input is malformed or uses an executable
 /// feature outside the current static ELF64 x86-64 tier.
 pub fn classify(input: &[u8]) -> Result<BinaryInfo, FormatError> {
+    classify_with_load_segments(input).map(|(info, _)| info)
+}
+
+pub(crate) fn classify_with_load_segments(
+    input: &[u8],
+) -> Result<(BinaryInfo, Vec<LoadSegment>), FormatError> {
     let identification = input
         .get(..16)
         .ok_or(FormatError::Truncated("ELF identification"))?;
@@ -250,7 +266,36 @@ pub fn classify(input: &[u8]) -> Result<BinaryInfo, FormatError> {
         return Err(FormatError::InvalidProgramHeaderTable);
     }
 
-    let mut load_segments = 0u16;
+    let load_segments = parse_program_headers(input, table_start, program_header_count)?;
+
+    if load_segments.is_empty() {
+        return Err(FormatError::NoLoadSegments);
+    }
+
+    let load_segment_count =
+        u16::try_from(load_segments.len()).map_err(|_| FormatError::InvalidProgramHeaderTable)?;
+    Ok((
+        BinaryInfo {
+            format: BinaryFormat::Elf,
+            class: BinaryClass::Elf64,
+            endianness: Endianness::Little,
+            architecture: Architecture::X86_64,
+            binary_type: BinaryType::StaticExecutable,
+            machine,
+            file_type,
+            entry_point,
+            load_segments: load_segment_count,
+        },
+        load_segments,
+    ))
+}
+
+fn parse_program_headers(
+    input: &[u8],
+    table_start: usize,
+    program_header_count: u16,
+) -> Result<Vec<LoadSegment>, FormatError> {
+    let mut load_segments = Vec::new();
     for index in 0..program_header_count {
         let offset = table_start + usize::from(index) * ELF64_PROGRAM_HEADER_LEN;
         let program_header = &input[offset..offset + ELF64_PROGRAM_HEADER_LEN];
@@ -265,29 +310,19 @@ pub fn classify(input: &[u8]) -> Result<BinaryInfo, FormatError> {
             }
             PROGRAM_TYPE_LOAD => {
                 validate_load_segment(input.len(), program_header, index)?;
-                load_segments = load_segments
-                    .checked_add(1)
-                    .ok_or(FormatError::InvalidProgramHeaderTable)?;
+                load_segments.push(LoadSegment {
+                    flags: read_u32(program_header, 4)?,
+                    file_offset: read_u64(program_header, 8)?,
+                    virtual_address: read_u64(program_header, 16)?,
+                    file_size: read_u64(program_header, 32)?,
+                    memory_size: read_u64(program_header, 40)?,
+                    alignment: read_u64(program_header, 48)?,
+                });
             }
             _ => {}
         }
     }
-
-    if load_segments == 0 {
-        return Err(FormatError::NoLoadSegments);
-    }
-
-    Ok(BinaryInfo {
-        format: BinaryFormat::Elf,
-        class: BinaryClass::Elf64,
-        endianness: Endianness::Little,
-        architecture: Architecture::X86_64,
-        binary_type: BinaryType::StaticExecutable,
-        machine,
-        file_type,
-        entry_point,
-        load_segments,
-    })
+    Ok(load_segments)
 }
 
 fn validate_load_segment(
