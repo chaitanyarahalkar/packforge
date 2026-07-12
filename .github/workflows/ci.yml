@@ -55,7 +55,14 @@ jobs:
       - name: Reproducible runtime artifact
         run: bash scripts/build-runtime.sh --check
       - name: Reproducible runtime v2 artifact
+        env:
+          PACKFORGE_RUNTIME_V2_OUTPUT: target/runtime-v2-linux/loader-v2
         run: bash scripts/build-runtime-v2.sh --check
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: packforge-runtime-v2-linux
+          path: target/runtime-v2-linux/loader-v2
       - name: LZMA size feasibility gate
         run: bash scripts/ci-lzma-spike.sh
       - name: Static ELF round trip

@@ -53,6 +53,15 @@ if (( size > 23500 )); then
 fi
 python3 "$workspace/scripts/check-runtime-v2-elf.py" "$normalized"
 
+if [[ -n "${PACKFORGE_RUNTIME_V2_OUTPUT:-}" ]]; then
+  output="$PACKFORGE_RUNTIME_V2_OUTPUT"
+  if [[ "$output" != /* ]]; then
+    output="$workspace/$output"
+  fi
+  mkdir -p "$(dirname "$output")"
+  install -m 0644 "$normalized" "$output"
+fi
+
 if command -v sha256sum >/dev/null 2>&1; then
   digest="$(sha256sum "$normalized" | awk '{print $1}')"
 else
