@@ -191,6 +191,7 @@ jobs:
           PACKFORGE_ASM_OBJECT_OUTPUT: benchmark-output/LzmaDecOpt.o
           PACKFORGE_BROTLI_OUTPUT: benchmark-output/m2-brotli.tsv
           PACKFORGE_APULTRA_BCJ2_OUTPUT: benchmark-output/m2-apultra-bcj2.tsv
+          PACKFORGE_CODEC5_PARTITION_OUTPUT: benchmark-output/m2-codec5-partition.tsv
           PACKFORGE_BENCHMARK_RUNTIME_CANDIDATE: "1"
           PACKFORGE_PHASE_ITERATIONS: "7"
           PACKFORGE_DROP_CACHES: "1"

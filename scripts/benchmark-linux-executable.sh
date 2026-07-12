@@ -43,6 +43,7 @@ asm_oracle_output="${PACKFORGE_ASM_ORACLE_OUTPUT:-}"
 asm_object_output="${PACKFORGE_ASM_OBJECT_OUTPUT:-}"
 brotli_output="${PACKFORGE_BROTLI_OUTPUT:-}"
 apultra_bcj2_output="${PACKFORGE_APULTRA_BCJ2_OUTPUT:-}"
+codec5_partition_output="${PACKFORGE_CODEC5_PARTITION_OUTPUT:-}"
 force_codec4="${PACKFORGE_BENCHMARK_CODEC4:-0}"
 runtime_candidate="${PACKFORGE_BENCHMARK_RUNTIME_CANDIDATE:-0}"
 if ! [[ "$phase_iterations" =~ ^[0-9]+$ ]] || \
@@ -81,6 +82,10 @@ fi
 if [[ -n "$apultra_bcj2_output" ]]; then
     printf 'fixture\truntime_image_bytes\trecovery_tail_bytes\tpayload_bytes\tmedian_decode_ns\trust_main_decode_ns\trust_call_decode_ns\trust_jump_decode_ns\trust_bcj2_decode_ns\tupx_bytes\tupx_ceiling_bytes\tmaximum_loader_for_upx_bytes\tmaximum_loader_for_105_percent_bytes\tbare_loader_bytes\toracle_text_bytes\toracle_rodata_bytes\tlinked_loader_lower_bound_bytes\tprojected_bytes\n' > "$apultra_bcj2_output"
 fi
+if [[ -n "$codec5_partition_output" ]]; then
+    printf 'fixture\tstreams\tmain_decoded_bytes\twhole_main_compressed_bytes\tsplit_main_compressed_bytes\tmain_delta_bytes\tfixed_table_delta_bytes\tmaximum_loader_for_upx_bytes\tremaining_loader_bytes\tformat_budget_pass\n' \
+        > "$codec5_partition_output"
+fi
 
 upx_version="5.2.0"
 upx_archive="$scratch/upx-$upx_version-amd64_linux.tar.xz"
@@ -118,6 +123,11 @@ fi
 if [[ -n "$codec_spike_output" ]]; then
     cargo build --release --locked -p packforge-core --example m2_codec_spike >/dev/null
     codec_spike="$target_dir/release/examples/m2_codec_spike"
+fi
+if [[ -n "$codec5_partition_output" ]]; then
+    cargo build --release --locked -p packforge-core \
+        --example m2_codec5_partition_spike >/dev/null
+    codec5_partition_spike="$target_dir/release/examples/m2_codec5_partition_spike"
 fi
 if [[ -n "$asm_oracle_output" ]]; then
     seven_zip_commit="f9d78aff31a5f2521ae7ddbdc97c4a8855808959"
@@ -412,6 +422,32 @@ for label in hello-c hello-cpp hello-rust hello-go; do
             "$apultra_oracle_text_bytes" "$apultra_oracle_rodata_bytes" \
             "$apultra_linked_loader_lower_bound" "$apultra_projected_bytes" \
             >> "$apultra_bcj2_output"
+    fi
+
+    if [[ -n "$codec5_partition_output" ]]; then
+        codec5_loader_bytes="$(stat -c %s "$workspace/runtime/artifacts/linux-x86_64/loader-v2-codec5")"
+        while IFS=$'\t' read -r streams main_decoded whole_main split_main main_delta; do
+            if [[ "$streams" == "streams" ]]; then
+                continue
+            fi
+            fixed_table_delta=0
+            if (( streams == 4 )); then
+                fixed_table_delta=96
+            elif (( streams == 2 )); then
+                fixed_table_delta=48
+            fi
+            maximum_loader_for_upx="$((apultra_loader_for_upx - main_delta - fixed_table_delta))"
+            remaining_loader_bytes="$((maximum_loader_for_upx - codec5_loader_bytes))"
+            format_budget_pass=false
+            if (( remaining_loader_bytes > 0 )); then
+                format_budget_pass=true
+            fi
+            printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
+                "$label" "$streams" "$main_decoded" "$whole_main" "$split_main" \
+                "$main_delta" "$fixed_table_delta" "$maximum_loader_for_upx" \
+                "$remaining_loader_bytes" "$format_budget_pass" \
+                >> "$codec5_partition_output"
+        done < <("$codec5_partition_spike" "$apultra_runtime")
     fi
 
     if [[ -n "$brotli_output" ]]; then
