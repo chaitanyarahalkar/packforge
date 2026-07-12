@@ -36,8 +36,16 @@ if [[ "$target_dir" != /* ]]; then
 fi
 packer="$target_dir/release/packforge"
 raw_samples="${PACKFORGE_BENCHMARK_RAW:-}"
+runtime_traces="${PACKFORGE_RUNTIME_TRACES:-}"
 if [[ -n "$raw_samples" ]]; then
     printf 'fixture\tkind\tmetric\tsample\tvalue\n' > "$raw_samples"
+fi
+if [[ -n "$runtime_traces" ]]; then
+    if ! command -v strace >/dev/null 2>&1; then
+        printf 'PACKFORGE_RUNTIME_TRACES requires strace\n' >&2
+        exit 2
+    fi
+    mkdir -p "$runtime_traces"
 fi
 
 upx_version="5.2.0"
@@ -198,6 +206,14 @@ for label in hello-c hello-cpp hello-rust hello-go; do
     cmp "$scratch/original-behavior.stdout" "$scratch/upx-behavior.stdout"
     cmp "$scratch/original-behavior.stderr" "$scratch/upx-behavior.stderr"
     cmp "$scratch/original-behavior.status" "$scratch/upx-behavior.status"
+
+    if [[ -n "$runtime_traces" ]]; then
+        "$packer" inspect "$packforge" --json > "$runtime_traces/$label.inspect.json"
+        strace -f -qq -o "$runtime_traces/$label.strace" \
+            -e trace=execve,execveat,memfd_create,mmap,mprotect,openat,pread64,write \
+            -E PACKFORGE_SMOKE=benchmark \
+            "$packforge" round-trip >/dev/null
+    fi
 
     original_size="$(stat -c %s "$original")"
     for kind in original packforge upx; do

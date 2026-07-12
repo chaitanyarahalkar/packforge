@@ -66,6 +66,41 @@ reports failed performance gates. Pass `--enforce` only for
 a release gate; ordinary development and baseline runs must retain failing data.
 The authoritative contract and exit evidence are in `plans/M0.md`.
 
+## M2 performance and syscall contract
+
+M2 retains the complete version 1 timing report and combines it with one
+non-timed `strace` execution and one inspect report per Packforge fixture. Set
+`PACKFORGE_RUNTIME_TRACES` when collecting:
+
+```bash
+PACKFORGE_BENCHMARK_RAW=benchmark-output/raw-samples.tsv \
+PACKFORGE_RUNTIME_TRACES=benchmark-output/runtime-traces \
+PACKFORGE_DROP_CACHES=1 \
+  bash scripts/benchmark-linux-executable.sh 21 7 \
+  > benchmark-output/summary.tsv
+```
+
+After producing `report.json`, build the strict M2 view:
+
+```bash
+python3 scripts/m2_performance_contract.py build \
+  --benchmark-report benchmark-output/report.json \
+  --trace-directory benchmark-output/runtime-traces \
+  --loader runtime/artifacts/linux-x86_64/loader-v1 \
+  --output benchmark-output/m2-report.json
+python3 scripts/m2_performance_contract.py evaluate \
+  benchmark-output/m2-report.json
+```
+
+The v2 evaluator requires the same report to pass correctness, reversibility,
+determinism, the 23,500-byte loader limit, median size below UPX, every size within
+105% of UPX, median cold time below UPX, median RSS within 110%, direct mapping,
+zero `memfd_create`, and no secondary exec. Development builds may add
+`FIXTURE.phases.json` files containing nonempty nanosecond sample arrays for
+payload read/hash, decompression, segment mapping, and transfer. Missing phase
+files are represented explicitly as `null`; aggregate process timing is never
+silently presented as phase attribution.
+
 Warm-start measurements are microbenchmarks. Cold measurements are valid only
 when the report records `linux_drop_caches_3` on a dedicated runner. Results
 produced under architecture translation are useful for regression comparison but

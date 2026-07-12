@@ -1,0 +1,198 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/chaitanyarahalkar/packforge/benchmarks/schema/m2-performance-report-v2.schema.json",
+  "title": "Packforge M2 native performance report v2",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "generated_at_utc",
+    "source_commit",
+    "source_run_url",
+    "environment",
+    "tools",
+    "configuration",
+    "loader",
+    "fixtures",
+    "gates"
+  ],
+  "properties": {
+    "schema_version": {"const": 2},
+    "generated_at_utc": {"type": "string", "format": "date-time"},
+    "source_commit": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+    "source_run_url": {"type": "string", "minLength": 1},
+    "environment": {"type": "object"},
+    "tools": {"type": "object"},
+    "configuration": {"$ref": "#/$defs/configuration"},
+    "loader": {"$ref": "#/$defs/loader"},
+    "fixtures": {
+      "type": "array",
+      "minItems": 1,
+      "items": {"$ref": "#/$defs/fixture"}
+    },
+    "gates": {"$ref": "#/$defs/gates"}
+  },
+  "$defs": {
+    "configuration": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "packforge_profile",
+        "upx_mode",
+        "warm_iterations",
+        "cold_iterations",
+        "cold_cache_reset"
+      ],
+      "properties": {
+        "packforge_profile": {"enum": ["fast", "balanced", "small", "auto"]},
+        "upx_mode": {"const": "--best"},
+        "warm_iterations": {"type": "integer", "minimum": 3, "maximum": 101},
+        "cold_iterations": {"type": "integer", "minimum": 1, "maximum": 31},
+        "cold_cache_reset": {"const": "linux_drop_caches_3"}
+      }
+    },
+    "loader": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "bytes",
+        "sha256",
+        "elf_type",
+        "runtime_codec",
+        "max_decoder_memory_bytes",
+        "direct_mapping"
+      ],
+      "properties": {
+        "bytes": {"type": "integer", "minimum": 1},
+        "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        "elf_type": {"enum": ["et_exec", "et_dyn"]},
+        "runtime_codec": {"enum": ["lz4", "lzma1"]},
+        "max_decoder_memory_bytes": {"type": "integer", "minimum": 1},
+        "direct_mapping": {"type": "boolean"}
+      }
+    },
+    "artifact": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["bytes", "warm_time_ns", "cold_time_ns", "peak_rss_kib"],
+      "properties": {
+        "bytes": {"type": "integer", "minimum": 1},
+        "warm_time_ns": {"type": "integer", "minimum": 0},
+        "cold_time_ns": {"type": "integer", "minimum": 1},
+        "peak_rss_kib": {"type": "integer", "minimum": 1}
+      }
+    },
+    "syscalls": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "execve",
+        "execveat",
+        "memfd_create",
+        "mmap",
+        "mprotect",
+        "openat",
+        "pread64",
+        "write"
+      ],
+      "properties": {
+        "execve": {"type": "integer", "minimum": 0},
+        "execveat": {"type": "integer", "minimum": 0},
+        "memfd_create": {"type": "integer", "minimum": 0},
+        "mmap": {"type": "integer", "minimum": 0},
+        "mprotect": {"type": "integer", "minimum": 0},
+        "openat": {"type": "integer", "minimum": 0},
+        "pread64": {"type": "integer", "minimum": 0},
+        "write": {"type": "integer", "minimum": 0}
+      }
+    },
+    "phase_samples": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["payload_read", "payload_hash", "decompress", "map_segments", "transfer"],
+      "properties": {
+        "payload_read": {"type": "array", "items": {"type": "integer", "minimum": 0}},
+        "payload_hash": {"type": "array", "items": {"type": "integer", "minimum": 0}},
+        "decompress": {"type": "array", "items": {"type": "integer", "minimum": 0}},
+        "map_segments": {"type": "array", "items": {"type": "integer", "minimum": 0}},
+        "transfer": {"type": "array", "items": {"type": "integer", "minimum": 0}}
+      }
+    },
+    "fixture": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "packforge",
+        "upx",
+        "payload_bytes",
+        "decoder_memory_bytes",
+        "size_packforge_over_upx_basis_points",
+        "cold_packforge_over_upx_basis_points",
+        "rss_packforge_over_upx_basis_points",
+        "behavior_matches_original",
+        "reversible",
+        "deterministic",
+        "syscalls",
+        "phase_timings_ns"
+      ],
+      "properties": {
+        "id": {"type": "string", "pattern": "^[a-z0-9-]+$"},
+        "packforge": {"$ref": "#/$defs/artifact"},
+        "upx": {"$ref": "#/$defs/artifact"},
+        "payload_bytes": {"type": "integer", "minimum": 1},
+        "decoder_memory_bytes": {"type": "integer", "minimum": 1},
+        "size_packforge_over_upx_basis_points": {"type": "integer", "minimum": 1},
+        "cold_packforge_over_upx_basis_points": {"type": "integer", "minimum": 1},
+        "rss_packforge_over_upx_basis_points": {"type": "integer", "minimum": 1},
+        "behavior_matches_original": {"type": "boolean"},
+        "reversible": {"type": "boolean"},
+        "deterministic": {"type": "boolean"},
+        "syscalls": {"$ref": "#/$defs/syscalls"},
+        "phase_timings_ns": {
+          "oneOf": [{"type": "null"}, {"$ref": "#/$defs/phase_samples"}]
+        }
+      }
+    },
+    "gates": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "correctness_pass",
+        "reversibility_pass",
+        "determinism_pass",
+        "loader_size_limit_bytes",
+        "loader_size_pass",
+        "median_size_packforge_over_upx_basis_points",
+        "all_size_within_105_percent",
+        "size_win_pass",
+        "median_cold_packforge_over_upx_basis_points",
+        "cold_win_pass",
+        "median_rss_packforge_over_upx_basis_points",
+        "rss_pass",
+        "direct_mapping_pass",
+        "no_memfd_pass",
+        "no_secondary_exec_pass",
+        "release_pass"
+      ],
+      "properties": {
+        "correctness_pass": {"type": "boolean"},
+        "reversibility_pass": {"type": "boolean"},
+        "determinism_pass": {"type": "boolean"},
+        "loader_size_limit_bytes": {"const": 23500},
+        "loader_size_pass": {"type": "boolean"},
+        "median_size_packforge_over_upx_basis_points": {"type": "integer", "minimum": 1},
+        "all_size_within_105_percent": {"type": "boolean"},
+        "size_win_pass": {"type": "boolean"},
+        "median_cold_packforge_over_upx_basis_points": {"type": "integer", "minimum": 1},
+        "cold_win_pass": {"type": "boolean"},
+        "median_rss_packforge_over_upx_basis_points": {"type": "integer", "minimum": 1},
+        "rss_pass": {"type": "boolean"},
+        "direct_mapping_pass": {"type": "boolean"},
+        "no_memfd_pass": {"type": "boolean"},
+        "no_secondary_exec_pass": {"type": "boolean"},
+        "release_pass": {"type": "boolean"}
+      }
+    }
+  }
+}
