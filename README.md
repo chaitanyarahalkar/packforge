@@ -7,9 +7,9 @@ The packer tool will ship as a single binary per host platform and produce
 self-contained executables. The first supported target is Linux ELF on x86-64.
 
 > [!IMPORTANT]
-> Packforge's deterministic, reversible `.pfg` container is implemented. The M2
-> Linux x86-64 native runtime is available as an opt-in compatibility spike and
-> is not yet the default output.
+> Packforge's deterministic, reversible `.pfg` container and M2 direct-load
+> Linux x86-64 runtime are implemented. Containers remain the default artifact;
+> pass `--artifact executable` to produce a self-contained native executable.
 
 ## Why another packer?
 
@@ -42,11 +42,14 @@ M1 accepts static, non-PIE, little-endian ELF64 x86-64 executables. It validates
 the ELF program-header table and rejects `PT_INTERP` and `PT_DYNAMIC` instead of
 silently claiming dynamic executables are supported.
 
-`pack --artifact executable --profile fast` produces a native Linux x86-64
-wrapper containing the freestanding loader, an embedded recovery container, and
-an integrity-checked fixed trailer. During the runtime spike, executable output is
-LZ4-only and remains opt-in; `fast` is selected automatically when `--profile`
-is omitted. `inspect`, `verify`, and `unpack` auto-detect both artifact kinds.
+`pack --artifact executable` produces executable format v2: a native Linux
+x86-64 wrapper containing a relocation-free freestanding loader, an authenticated
+segment manifest, a bounded raw-LZMA1 payload, and a fixed trailer. `balanced` is
+selected automatically. At startup the loader verifies and decompresses the
+original, maps its `PT_LOAD` segments with W^X protections, repairs the auxiliary
+vector, and transfers directly to the original entry point without a memfd or a
+second exec. `inspect`, `verify`, and `unpack` auto-detect containers plus legacy
+v1 and direct-load v2 executables.
 
 `pack` produces a checksummed container. `inspect` validates the fixed header and
 compressed payload without decompressing. `verify` and `unpack` additionally
@@ -135,13 +138,14 @@ cargo clippy --workspace --all-targets -- -D warnings
 cargo test --workspace
 cargo run -p packforge-cli -- status
 bash scripts/build-runtime.sh --check
+bash scripts/build-runtime-v2.sh --check
 ```
 
 The current implementation uses BLAKE3 for integrity. Recovery containers support
 LZ4 for `fast` and Zstandard for `balanced`/`small`; `auto` deterministically
-selects the smallest stable container payload. Self-contained executable output
-currently uses only the bounded LZ4 runtime. The measured Zstandard runtime
-experiment and its no-go result are documented under `runtime/zstd-spike/`.
+selects the smallest stable container payload. Direct-load executable v2 uses the
+bounded raw-LZMA1 runtime. The measured Zstandard runtime experiment and its no-go
+result are documented under `runtime/zstd-spike/`.
 
 ## License
 

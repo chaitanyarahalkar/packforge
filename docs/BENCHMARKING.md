@@ -86,7 +86,7 @@ After producing `report.json`, build the strict M2 view:
 python3 scripts/m2_performance_contract.py build \
   --benchmark-report benchmark-output/report.json \
   --trace-directory benchmark-output/runtime-traces \
-  --loader runtime/artifacts/linux-x86_64/loader-v1 \
+  --loader runtime/artifacts/linux-x86_64/loader-v2 \
   --output benchmark-output/m2-report.json
 python3 scripts/m2_performance_contract.py evaluate \
   benchmark-output/m2-report.json

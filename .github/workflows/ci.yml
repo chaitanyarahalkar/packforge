@@ -119,6 +119,30 @@ jobs:
           name: packforge-container-reproducibility
           path: target/container-reproducibility/container-digests-macos.tsv
 
+  runtime-kernel-matrix:
+    name: runtime (${{ matrix.runner }})
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [ubuntu-22.04, ubuntu-24.04]
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v6
+      - uses: dtolnay/rust-toolchain@1.97.0
+        with:
+          targets: x86_64-unknown-linux-musl
+      - uses: actions/setup-go@v6
+        with:
+          go-version: 1.26.4
+          cache: false
+      - name: Record native runner and require full ASLR
+        run: |
+          uname -a
+          cat /etc/os-release
+          test "$(cat /proc/sys/kernel/randomize_va_space)" -eq 2
+      - name: Direct-runtime compatibility smoke
+        run: bash scripts/ci-linux-executable-smoke.sh
+
   benchmark:
     if: github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
@@ -156,7 +180,7 @@ jobs:
           python3 scripts/m2_performance_contract.py build \
             --benchmark-report benchmark-output/report.json \
             --trace-directory benchmark-output/runtime-traces \
-            --loader runtime/artifacts/linux-x86_64/loader-v1 \
+            --loader runtime/artifacts/linux-x86_64/loader-v2 \
             --output benchmark-output/m2-report.json
           python3 scripts/m2_performance_contract.py evaluate \
             benchmark-output/m2-report.json > benchmark-output/m2-gates.json
