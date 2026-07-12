@@ -56,7 +56,9 @@ python3 scripts/benchmark_contract.py report \
   --summary benchmark-output/summary.tsv \
   --raw benchmark-output/raw-samples.tsv \
   --metadata benchmark-output/metadata.json \
-  --output benchmark-output/report.json
+  --output benchmark-output/report.json \
+  --packforge-profile balanced \
+  --cold-cache-reset linux_drop_caches_3
 python3 scripts/benchmark_contract.py evaluate benchmark-output/report.json
 ```
 
@@ -87,6 +89,7 @@ python3 scripts/m2_performance_contract.py build \
   --benchmark-report benchmark-output/report.json \
   --trace-directory benchmark-output/runtime-traces \
   --loader runtime/artifacts/linux-x86_64/loader-v2 \
+  --direct-mapping \
   --output benchmark-output/m2-report.json
 python3 scripts/m2_performance_contract.py evaluate \
   benchmark-output/m2-report.json

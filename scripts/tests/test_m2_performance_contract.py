@@ -110,6 +110,19 @@ execveat(4, \"\", [\"packed\"], [], AT_EMPTY_PATH) = 0
             with self.assertRaises(m2.ContractError):
                 m2.parse_trace(trace)
 
+    def test_reads_direct_load_v2_payload_metadata(self):
+        codec, payload_size, decoder_memory = m2.inspect_payload(
+            {
+                "artifact_kind": "executable",
+                "executable_version": 2,
+                "payload_size": 123_456,
+            },
+            "fixture",
+        )
+        self.assertEqual(codec, "lzma1")
+        self.assertEqual(payload_size, 123_456)
+        self.assertIsNone(decoder_memory)
+
 
 if __name__ == "__main__":
     unittest.main()

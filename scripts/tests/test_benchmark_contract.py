@@ -99,6 +99,7 @@ class BenchmarkContractTests(unittest.TestCase):
             summary=result / "summary.tsv",
             raw=result / "raw-samples.tsv",
             metadata=result / "metadata.json",
+            packforge_profile="fast",
             cold_cache_reset="linux_drop_caches_3",
         )
         first = benchmark_contract.build_report(arguments)

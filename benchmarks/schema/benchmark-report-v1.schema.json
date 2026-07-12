@@ -68,7 +68,7 @@
         "cold_cache_reset"
       ],
       "properties": {
-        "packforge_profile": {"const": "fast"},
+        "packforge_profile": {"enum": ["fast", "balanced", "small", "auto"]},
         "upx_mode": {"const": "--best"},
         "warmup_iterations": {"type": "integer", "minimum": 1},
         "warm_iterations": {"type": "integer", "minimum": 3, "maximum": 101},
