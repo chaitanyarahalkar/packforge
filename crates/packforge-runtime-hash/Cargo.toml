@@ -1,0 +1,18 @@
+[package]
+name = "packforge-runtime-hash"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+[features]
+lzma = []
+optimized = []
+
+[dev-dependencies]
+blake3 = { version = "1.8.5", features = ["pure"] }
+
+[lints]
+workspace = true

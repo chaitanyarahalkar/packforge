@@ -1,4 +1,4 @@
-//! Compact unkeyed BLAKE3 used by the freestanding runtime.
+// Compact unkeyed BLAKE3 used by the freestanding runtime.
 
 const BLOCK_LEN: usize = 64;
 const CHUNK_LEN: usize = 1024;
@@ -173,8 +173,13 @@ fn compress(
     state[14] = block_len;
     state[15] = flags;
 
+    #[cfg(not(feature = "optimized"))]
     for schedule in MSG_SCHEDULE {
         round(&mut state, &block_words, &schedule);
+    }
+    #[cfg(feature = "optimized")]
+    for schedule in &MSG_SCHEDULE {
+        round(&mut state, &block_words, schedule);
     }
     for index in 0..8 {
         state[index] ^= state[index + 8];

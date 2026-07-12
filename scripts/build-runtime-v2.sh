@@ -6,14 +6,58 @@ runtime="$workspace/runtime/linux-x86_64"
 artifact="$workspace/runtime/artifacts/linux-x86_64/loader-v2"
 checksum_file="$artifact.sha256"
 mode="${1:---check}"
+opt_level="${PACKFORGE_RUNTIME_V2_OPT_LEVEL:-z}"
+relocation_model="${PACKFORGE_RUNTIME_V2_RELOCATION_MODEL:-pic}"
+decoder_opt_level="${PACKFORGE_RUNTIME_V2_DECODER_OPT_LEVEL-3}"
+hash_implementation="${PACKFORGE_RUNTIME_V2_HASH:-compact-opt2}"
 
 case "$mode" in
-  --check | --update) ;;
+  --check | --update | --candidate) ;;
   *)
-    printf 'usage: %s [--check|--update]\n' "$0" >&2
+    printf 'usage: %s [--check|--update|--candidate]\n' "$0" >&2
     exit 2
     ;;
 esac
+
+case "$opt_level" in
+  z | s | 1 | 2 | 3) ;;
+  *)
+    printf 'PACKFORGE_RUNTIME_V2_OPT_LEVEL must be one of: z, s, 1, 2, 3\n' >&2
+    exit 2
+    ;;
+esac
+
+case "$relocation_model" in
+  pic | pie) ;;
+  *)
+    printf 'PACKFORGE_RUNTIME_V2_RELOCATION_MODEL must be pic or pie\n' >&2
+    exit 2
+    ;;
+esac
+
+if [[ -n "$decoder_opt_level" ]]; then
+  case "$decoder_opt_level" in
+    z | s | 1 | 2 | 3) ;;
+    *)
+      printf 'PACKFORGE_RUNTIME_V2_DECODER_OPT_LEVEL must be one of: z, s, 1, 2, 3\n' >&2
+      exit 2
+      ;;
+  esac
+fi
+
+case "$hash_implementation" in
+  compact) runtime_features=lzma ;;
+  compact-opt1 | compact-opt2) runtime_features=lzma,optimized-hash ;;
+  *)
+    printf 'PACKFORGE_RUNTIME_V2_HASH must be compact, compact-opt1, or compact-opt2\n' >&2
+    exit 2
+    ;;
+esac
+
+if [[ "$mode" == "--candidate" && -z "${PACKFORGE_RUNTIME_V2_OUTPUT:-}" ]]; then
+  printf 'PACKFORGE_RUNTIME_V2_OUTPUT is required with --candidate\n' >&2
+  exit 2
+fi
 
 if [[ -n "${CARGO_TARGET_DIR:-}" ]]; then
   target_dir="$CARGO_TARGET_DIR"
@@ -34,11 +78,32 @@ sysroot="$("$rustc_bin" --print sysroot)"
 host="$("$rustc_bin" -vV | awk '/^host:/ {print $2}')"
 objcopy="$sysroot/lib/rustlib/$host/bin/llvm-objcopy"
 
-rustflags='-C linker-flavor=ld.lld -C link-self-contained=no -C link-arg=-nostdlib -C link-arg=-static -C link-arg=-pie -C link-arg=--no-dynamic-linker -C link-arg=-Bsymbolic -C link-arg=--gc-sections -C link-arg=--sort-section=name -C link-arg=--no-eh-frame-hdr -C link-arg=-z -C link-arg=noexecstack -C relocation-model=pic -C force-unwind-tables=no'
+rustflags="-C linker-flavor=ld.lld -C link-self-contained=no -C link-arg=-nostdlib -C link-arg=-static -C link-arg=-pie -C link-arg=--no-dynamic-linker -C link-arg=-Bsymbolic -C link-arg=--gc-sections -C link-arg=--sort-section=name -C link-arg=--no-eh-frame-hdr -C link-arg=-z -C link-arg=noexecstack -C relocation-model=$relocation_model -C force-unwind-tables=no"
+cargo_arguments=(
+  build --release --locked --features "$runtime_features"
+  --bin packforge-runtime-v2-linux-x86-64
+)
+if [[ -n "$decoder_opt_level" ]]; then
+  decoder_opt_value="$decoder_opt_level"
+  if [[ "$decoder_opt_level" == "z" || "$decoder_opt_level" == "s" ]]; then
+    decoder_opt_value="\"$decoder_opt_level\""
+  fi
+  cargo_arguments=(
+    --config "profile.release.package.packforge-lzma-decoder.opt-level=$decoder_opt_value"
+    "${cargo_arguments[@]}"
+  )
+fi
+if [[ "$hash_implementation" == compact-opt* ]]; then
+  hash_opt_level="${hash_implementation#compact-opt}"
+  cargo_arguments=(
+    --config "profile.release.package.packforge-runtime-hash.opt-level=$hash_opt_level"
+    "${cargo_arguments[@]}"
+  )
+fi
 (cd "$runtime" && \
   CARGO_TARGET_DIR="$target_dir" RUSTC="$rustc_bin" RUSTFLAGS="$rustflags" \
-  "$cargo_bin" build --release --locked --features lzma \
-    --bin packforge-runtime-v2-linux-x86-64)
+  CARGO_PROFILE_RELEASE_OPT_LEVEL="$opt_level" \
+  "$cargo_bin" "${cargo_arguments[@]}")
 
 raw_built="$target_dir/x86_64-unknown-linux-musl/release/packforge-runtime-v2-linux-x86-64"
 normalized="$(mktemp "${TMPDIR:-/tmp}/packforge-runtime-v2.XXXXXX")"
@@ -71,7 +136,7 @@ fi
 if [[ "$mode" == "--update" ]]; then
   install -m 0644 "$normalized" "$artifact"
   printf '%s  loader-v2\n' "$digest" > "$checksum_file"
-else
+elif [[ "$mode" == "--check" ]]; then
   cmp "$normalized" "$artifact"
   expected="$(awk '{print $1}' "$checksum_file")"
   if [[ "$digest" != "$expected" ]]; then
@@ -81,4 +146,6 @@ else
   fi
 fi
 
-printf 'runtime v2 artifact verified: %s bytes sha256=%s\n' "$size" "$digest"
+printf 'runtime v2 artifact verified: opt=%s decoder-opt=%s hash=%s relocation=%s size=%s bytes sha256=%s\n' \
+  "$opt_level" "${decoder_opt_level:-inherit}" "$hash_implementation" \
+  "$relocation_model" "$size" "$digest"

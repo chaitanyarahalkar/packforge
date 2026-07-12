@@ -88,6 +88,10 @@ name = "packforge-lzma-decoder"
 version = "0.1.0"
 
 [[package]]
+name = "packforge-runtime-hash"
+version = "0.1.0"
+
+[[package]]
 name = "packforge-runtime-linux-x86-64"
 version = "0.1.0"
 dependencies = [
@@ -95,6 +99,7 @@ dependencies = [
  "lz4_flex",
  "lzma-sdk-rs",
  "packforge-lzma-decoder",
+ "packforge-runtime-hash",
 ]
 
 [[package]]

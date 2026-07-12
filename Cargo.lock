@@ -299,6 +299,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "packforge-runtime-hash"
+version = "0.1.0"
+dependencies = [
+ "blake3",
+]
+
+[[package]]
 name = "pkg-config"
 version = "0.3.33"
 source = "registry+https://github.com/rust-lang/crates.io-index"

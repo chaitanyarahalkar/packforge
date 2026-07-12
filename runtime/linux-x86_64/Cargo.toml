@@ -6,9 +6,12 @@ publish = false
 
 [dependencies]
 packforge-lzma-decoder = { path = "../../crates/packforge-lzma-decoder", optional = true }
+packforge-runtime-hash = { path = "../../crates/packforge-runtime-hash", features = ["lzma", "optimized"], optional = true }
 
 [features]
 lzma = ["dep:packforge-lzma-decoder"]
+optimized-hash = ["dep:packforge-runtime-hash"]
+optimized = []
 lzma-size-spike = ["lzma"]
 
 [[bin]]

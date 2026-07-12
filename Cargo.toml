@@ -3,6 +3,7 @@ members = [
     "crates/packforge-cli",
     "crates/packforge-core",
     "crates/packforge-lzma-decoder",
+    "crates/packforge-runtime-hash",
 ]
 resolver = "3"
 
