@@ -103,7 +103,10 @@ impl ContainerError {
     pub const fn diagnostic(&self) -> Diagnostic {
         match self {
             Self::Format(error) => error.diagnostic(),
-            Self::SizeLimit { .. } | Self::InvalidIterations { .. } => {
+            Self::SizeLimit { .. }
+            | Self::Allocation { .. }
+            | Self::DecoderWindowLimit { .. }
+            | Self::InvalidIterations { .. } => {
                 Diagnostic::new("PFG3001", DiagnosticClass::ResourceLimit)
             }
             Self::UnsupportedVersion(_)

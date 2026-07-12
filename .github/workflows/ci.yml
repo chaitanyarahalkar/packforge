@@ -28,6 +28,17 @@ jobs:
         run: cargo clippy --workspace --all-targets -- -D warnings
       - name: Test
         run: cargo test --workspace --locked
+      - name: Install dependency auditor
+        run: cargo install cargo-audit --version 0.22.2 --locked
+      - name: Audit every shipped and test lockfile
+        run: |
+          for lockfile in \
+            Cargo.lock \
+            fuzz/Cargo.lock \
+            runtime/linux-x86_64/Cargo.lock \
+            runtime/zstd-spike/Cargo.lock; do
+            cargo audit --deny warnings --file "$lockfile"
+          done
       - name: Benchmark contract
         run: |
           python3 scripts/benchmark_contract.py validate-corpus

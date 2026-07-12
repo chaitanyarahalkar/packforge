@@ -16,6 +16,17 @@ fi
 packer="$target_dir/release/packforge"
 digest_manifest="${PACKFORGE_CONTAINER_DIGESTS:-$scratch/container-digests.tsv}"
 corpus_output="${PACKFORGE_CORPUS_OUTPUT:-}"
+memory_limit_kib="${PACKFORGE_MEMORY_LIMIT_KIB:-524288}"
+
+if [[ ! "$memory_limit_kib" =~ ^[0-9]+$ ]] || (( memory_limit_kib < 131072 )); then
+  printf 'PACKFORGE_MEMORY_LIMIT_KIB must be an integer of at least 131072\n' >&2
+  exit 2
+fi
+
+run_limited() (
+  ulimit -v "$memory_limit_kib"
+  "$@"
+)
 
 python3 "$workspace/scripts/benchmark_contract.py" validate-corpus \
   --workspace "$workspace" \
@@ -55,14 +66,14 @@ exercise_profile() {
   local restored="$scratch/$fixture-$profile-restored"
   local pack_report="$scratch/$fixture-$profile-pack.json"
 
-  "$packer" pack "$original" --output "$container" --profile "$profile" \
+  run_limited "$packer" pack "$original" --output "$container" --profile "$profile" \
     --allow-larger --json > "$pack_report"
-  "$packer" pack "$original" --output "$second" --profile "$profile" \
+  run_limited "$packer" pack "$original" --output "$second" --profile "$profile" \
     --allow-larger --json >/dev/null
   cmp "$container" "$second"
-  "$packer" inspect "$container" --json >/dev/null
-  "$packer" verify "$container" --json >/dev/null
-  "$packer" unpack "$container" --output "$restored" --json >/dev/null
+  run_limited "$packer" inspect "$container" --json >/dev/null
+  run_limited "$packer" verify "$container" --json >/dev/null
+  run_limited "$packer" unpack "$container" --output "$restored" --json >/dev/null
   cmp "$original" "$restored"
   test "$(stat -c %a "$original")" = "$(stat -c %a "$restored")"
 
@@ -105,4 +116,5 @@ for fixture in hello-c hello-cpp hello-rust hello-go; do
 done
 
 cat "$digest_manifest"
-printf 'container corpus matrix passed: 4 fixtures x 4 profiles\n' >&2
+printf 'container corpus matrix passed: 4 fixtures x 4 profiles under %s KiB virtual-memory limit\n' \
+  "$memory_limit_kib" >&2

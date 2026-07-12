@@ -33,6 +33,8 @@ const ENDIAN_LITTLE: u8 = 1;
 const MACHINE_X86_64: u16 = 62;
 const FILE_TYPE_EXECUTABLE: u16 = 2;
 const ZSTD_MAX_WINDOW_LOG: u32 = 27;
+const ZSTD_MAX_WINDOW_SIZE: u64 = 1 << ZSTD_MAX_WINDOW_LOG;
+const ZSTD_FRAME_MAGIC: &[u8; 4] = b"\x28\xb5\x2f\xfd";
 
 /// User-facing compression policy.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -209,6 +211,20 @@ pub enum ContainerError {
         /// Maximum permitted byte length.
         maximum: u64,
     },
+    /// The host could not reserve the bounded decoder output buffer.
+    Allocation {
+        /// Buffer being reserved.
+        field: &'static str,
+        /// Requested byte capacity.
+        requested: u64,
+    },
+    /// A Zstandard frame declares a decoder window above the M1 limit.
+    DecoderWindowLimit {
+        /// Declared decoder window in bytes.
+        actual: u64,
+        /// Maximum permitted decoder window in bytes.
+        maximum: u64,
+    },
     /// A container is shorter than its fixed header.
     TruncatedHeader,
     /// The container magic bytes are not recognized.
@@ -286,6 +302,14 @@ impl fmt::Display for ContainerError {
             } => write!(
                 formatter,
                 "{field} is {actual} bytes; the M1 limit is {maximum} bytes"
+            ),
+            Self::Allocation { field, requested } => write!(
+                formatter,
+                "could not reserve {requested} bytes for {field} within host memory limits"
+            ),
+            Self::DecoderWindowLimit { actual, maximum } => write!(
+                formatter,
+                "Zstandard decoder window is {actual} bytes; the M1 limit is {maximum} bytes"
             ),
             Self::TruncatedHeader => formatter.write_str("truncated Packforge container header"),
             Self::InvalidMagic => formatter.write_str("input is not a Packforge container"),
@@ -412,7 +436,7 @@ pub fn pack(
         payload_size: usize_to_u64(payload.len()),
         original_hash,
         payload_hash,
-        original_mode,
+        original_mode: original_mode & 0o7777,
         binary,
     };
     let encoded_header = encode_header(&header);
@@ -532,7 +556,7 @@ fn decompress(header: &Header, payload: &[u8]) -> Result<Vec<u8>, ContainerError
     let original_len = u64_to_usize(header.original_size, "original image")?;
     let output = match header.codec {
         Codec::Lz4 => {
-            let mut output = vec![0u8; original_len];
+            let mut output = allocate_lz4_output(original_len, header.original_size)?;
             let written = lz4_flex::block::decompress_into(payload, &mut output)
                 .map_err(|error| ContainerError::Decompression(error.to_string()))?;
             if written != output.len() {
@@ -544,6 +568,7 @@ fn decompress(header: &Header, payload: &[u8]) -> Result<Vec<u8>, ContainerError
             output
         }
         Codec::Zstd => {
+            validate_zstd_window(payload)?;
             let decoder = zstd::stream::read::Decoder::new(Cursor::new(payload))
                 .map_err(|error| ContainerError::Decompression(error.to_string()))?;
             let mut decoder = decoder;
@@ -574,6 +599,60 @@ fn decompress(header: &Header, payload: &[u8]) -> Result<Vec<u8>, ContainerError
         });
     }
     Ok(output)
+}
+
+fn allocate_lz4_output(length: usize, requested: u64) -> Result<Vec<u8>, ContainerError> {
+    let mut output = Vec::new();
+    output
+        .try_reserve_exact(length)
+        .map_err(|_| ContainerError::Allocation {
+            field: "LZ4 decoder output",
+            requested,
+        })?;
+    output.resize(length, 0);
+    Ok(output)
+}
+
+fn validate_zstd_window(payload: &[u8]) -> Result<(), ContainerError> {
+    let Some(window_size) = zstd_window_size(payload) else {
+        return Ok(());
+    };
+    if window_size > ZSTD_MAX_WINDOW_SIZE {
+        return Err(ContainerError::DecoderWindowLimit {
+            actual: window_size,
+            maximum: ZSTD_MAX_WINDOW_SIZE,
+        });
+    }
+    Ok(())
+}
+
+fn zstd_window_size(payload: &[u8]) -> Option<u64> {
+    if payload.get(..4)? != ZSTD_FRAME_MAGIC {
+        return None;
+    }
+    let descriptor = *payload.get(4)?;
+    let single_segment = descriptor & 0x20 != 0;
+    if !single_segment {
+        let window_descriptor = *payload.get(5)?;
+        let window_log = 10 + u32::from(window_descriptor >> 3);
+        let window_base = 1u64.checked_shl(window_log).unwrap_or(u64::MAX);
+        let window_add = (window_base / 8) * u64::from(window_descriptor & 7);
+        return Some(window_base.saturating_add(window_add));
+    }
+
+    let dictionary_size = [0usize, 1, 2, 4][usize::from(descriptor & 3)];
+    let content_size_flag = descriptor >> 6;
+    let content_size_len = [1usize, 2, 4, 8][usize::from(content_size_flag)];
+    let start = 5usize.checked_add(dictionary_size)?;
+    let bytes = payload.get(start..start.checked_add(content_size_len)?)?;
+    let mut encoded = [0u8; 8];
+    encoded[..content_size_len].copy_from_slice(bytes);
+    let value = u64::from_le_bytes(encoded);
+    Some(if content_size_len == 2 {
+        value.saturating_add(256)
+    } else {
+        value
+    })
 }
 
 fn validate_original(header: &Header, original: &[u8]) -> Result<(), ContainerError> {
@@ -709,8 +788,12 @@ fn decode_header(bytes: &[u8]) -> Result<Header, ContainerError> {
         return Err(ContainerError::UnsupportedEmbeddedMetadata("load_segments"));
     }
     let original_mode = get_u32(bytes, 24)?;
+    if original_mode & !0o7777 != 0 {
+        return Err(ContainerError::UnsupportedEmbeddedMetadata("original_mode"));
+    }
     let codec_level = get_i32(bytes, 28)?;
     validate_codec_level(codec, codec_level)?;
+    validate_profile_codec(profile, codec, codec_level)?;
     let original_size = get_u64(bytes, 32)?;
     enforce_u64_size("original image", original_size, MAX_ORIGINAL_SIZE)?;
     let payload_size = get_u64(bytes, 40)?;
@@ -756,6 +839,27 @@ fn validate_codec_level(codec: Codec, level: i32) -> Result<(), ContainerError> 
             "Zstandard codec level",
         )),
     }
+}
+
+fn validate_profile_codec(
+    profile: Profile,
+    codec: Codec,
+    level: i32,
+) -> Result<(), ContainerError> {
+    let valid = match profile {
+        Profile::Fast => codec == Codec::Lz4 && level == 0,
+        Profile::Balanced => codec == Codec::Zstd && level == 3,
+        Profile::Small => codec == Codec::Zstd && level == 19,
+        Profile::Auto => {
+            (codec == Codec::Lz4 && level == 0) || (codec == Codec::Zstd && matches!(level, 3 | 19))
+        }
+    };
+    if !valid {
+        return Err(ContainerError::UnsupportedEmbeddedMetadata(
+            "profile codec selection",
+        ));
+    }
+    Ok(())
 }
 
 fn config_hash(header: &Header) -> [u8; 32] {
@@ -868,8 +972,9 @@ fn get_array_32(input: &[u8], offset: usize) -> Result<[u8; 32], ContainerError>
 #[cfg(test)]
 mod tests {
     use super::{
-        ContainerError, HEADER_HASH_END, HEADER_HASH_OFFSET, HEADER_LEN, PackOptions, Profile,
-        Verification, inspect, pack, unpack, verify,
+        ContainerError, HEADER_HASH_END, HEADER_HASH_OFFSET, HEADER_LEN, MAX_ORIGINAL_SIZE,
+        MAX_PAYLOAD_SIZE, PackOptions, Profile, Verification, allocate_lz4_output, decode_header,
+        encode_header, inspect, pack, unpack, verify, zstd_window_size,
     };
 
     fn fixture() -> Vec<u8> {
@@ -892,6 +997,52 @@ mod tests {
         bytes[104..112].copy_from_slice(&16_384u64.to_le_bytes());
         bytes[256..].fill(0x41);
         bytes
+    }
+
+    fn packed(profile: Profile) -> Vec<u8> {
+        pack(
+            &fixture(),
+            0o755,
+            PackOptions {
+                profile,
+                allow_larger: true,
+            },
+        )
+        .unwrap()
+        .bytes
+    }
+
+    fn repair_header_hash(container: &mut [u8]) {
+        container[HEADER_HASH_OFFSET..HEADER_HASH_END].fill(0);
+        let digest = *blake3::hash(&container[..HEADER_LEN]).as_bytes();
+        container[HEADER_HASH_OFFSET..HEADER_HASH_END].copy_from_slice(&digest);
+    }
+
+    fn mutate_raw(mut container: Vec<u8>, offset: usize, bytes: &[u8]) -> Vec<u8> {
+        container[offset..offset + bytes.len()].copy_from_slice(bytes);
+        repair_header_hash(&mut container);
+        container
+    }
+
+    fn corrupt_raw(mut container: Vec<u8>, offset: usize) -> Vec<u8> {
+        container[offset] ^= 0x80;
+        repair_header_hash(&mut container);
+        container
+    }
+
+    fn mutate_header(container: &mut [u8], mutation: impl FnOnce(&mut super::Header)) {
+        let mut header = decode_header(&container[..HEADER_LEN]).unwrap();
+        mutation(&mut header);
+        container[..HEADER_LEN].copy_from_slice(&encode_header(&header));
+    }
+
+    fn replace_payload(container: &mut Vec<u8>, payload: &[u8]) {
+        let mut header = decode_header(&container[..HEADER_LEN]).unwrap();
+        header.payload_size = u64::try_from(payload.len()).unwrap();
+        header.payload_hash = *blake3::hash(payload).as_bytes();
+        container.truncate(HEADER_LEN);
+        container.extend_from_slice(payload);
+        container[..HEADER_LEN].copy_from_slice(&encode_header(&header));
     }
 
     #[test]
@@ -970,6 +1121,254 @@ mod tests {
             inspect(&[0u8; HEADER_LEN - 1]),
             Err(ContainerError::TruncatedHeader)
         ));
+    }
+
+    #[test]
+    fn fixed_header_discriminators_fail_closed() {
+        let mut invalid_magic = packed(Profile::Fast);
+        invalid_magic[0] ^= 0x80;
+        assert!(matches!(
+            inspect(&invalid_magic),
+            Err(ContainerError::InvalidMagic)
+        ));
+
+        let invalid_version = mutate_raw(packed(Profile::Fast), 8, &2u16.to_le_bytes());
+        assert!(matches!(
+            inspect(&invalid_version),
+            Err(ContainerError::UnsupportedVersion(2))
+        ));
+        let invalid_header = mutate_raw(packed(Profile::Fast), 10, &191u16.to_le_bytes());
+        assert!(matches!(
+            inspect(&invalid_header),
+            Err(ContainerError::InvalidHeaderLength(191))
+        ));
+
+        let unknown_codec = mutate_raw(packed(Profile::Fast), 12, &[0]);
+        assert!(matches!(
+            inspect(&unknown_codec),
+            Err(ContainerError::UnknownCodec(0))
+        ));
+        let unknown_profile = mutate_raw(packed(Profile::Fast), 13, &[0]);
+        assert!(matches!(
+            inspect(&unknown_profile),
+            Err(ContainerError::UnknownProfile(0))
+        ));
+        let unknown_format = mutate_raw(packed(Profile::Fast), 14, &[0]);
+        assert!(matches!(
+            inspect(&unknown_format),
+            Err(ContainerError::UnknownFormat(0))
+        ));
+        let unknown_class = mutate_raw(packed(Profile::Fast), 15, &[0]);
+        assert!(matches!(
+            inspect(&unknown_class),
+            Err(ContainerError::UnknownClass(0))
+        ));
+        let unknown_endianness = mutate_raw(packed(Profile::Fast), 16, &[0]);
+        assert!(matches!(
+            inspect(&unknown_endianness),
+            Err(ContainerError::UnknownEndianness(0))
+        ));
+    }
+
+    #[test]
+    fn flags_reserved_fields_and_embedded_metadata_fail_closed() {
+        let flags = mutate_raw(packed(Profile::Fast), 17, &[1]);
+        assert!(matches!(
+            inspect(&flags),
+            Err(ContainerError::NonzeroReserved)
+        ));
+        for offset in 184..HEADER_LEN {
+            let reserved = mutate_raw(packed(Profile::Fast), offset, &[1]);
+            assert!(matches!(
+                inspect(&reserved),
+                Err(ContainerError::NonzeroReserved)
+            ));
+        }
+
+        for (offset, bytes, field) in [
+            (18, 0u16.to_le_bytes(), "machine"),
+            (20, 0u16.to_le_bytes(), "file_type"),
+            (22, 0u16.to_le_bytes(), "load_segments"),
+        ] {
+            let invalid = mutate_raw(packed(Profile::Fast), offset, &bytes);
+            assert!(matches!(
+                inspect(&invalid),
+                Err(ContainerError::UnsupportedEmbeddedMetadata(actual)) if actual == field
+            ));
+        }
+        let invalid_mode = mutate_raw(packed(Profile::Fast), 24, &0x1000u32.to_le_bytes());
+        assert!(matches!(
+            inspect(&invalid_mode),
+            Err(ContainerError::UnsupportedEmbeddedMetadata("original_mode"))
+        ));
+        let invalid_level = mutate_raw(packed(Profile::Fast), 28, &1i32.to_le_bytes());
+        assert!(matches!(
+            inspect(&invalid_level),
+            Err(ContainerError::UnsupportedEmbeddedMetadata(
+                "LZ4 codec level"
+            ))
+        ));
+
+        let mut mismatched_profile = packed(Profile::Fast);
+        mutate_header(&mut mismatched_profile, |header| {
+            header.profile = Profile::Balanced;
+        });
+        assert!(matches!(
+            inspect(&mismatched_profile),
+            Err(ContainerError::UnsupportedEmbeddedMetadata(
+                "profile codec selection"
+            ))
+        ));
+    }
+
+    #[test]
+    fn checked_sizes_and_exact_container_length_fail_closed() {
+        for original_size in [0, MAX_ORIGINAL_SIZE + 1] {
+            let invalid = mutate_raw(packed(Profile::Fast), 32, &original_size.to_le_bytes());
+            assert!(matches!(
+                inspect(&invalid),
+                Err(ContainerError::SizeLimit {
+                    field: "original image",
+                    ..
+                })
+            ));
+        }
+        for payload_size in [0, MAX_PAYLOAD_SIZE + 1] {
+            let invalid = mutate_raw(packed(Profile::Fast), 40, &payload_size.to_le_bytes());
+            assert!(matches!(
+                inspect(&invalid),
+                Err(ContainerError::SizeLimit {
+                    field: "compressed payload",
+                    ..
+                })
+            ));
+        }
+
+        let mut trailing = packed(Profile::Fast);
+        trailing.push(0);
+        assert!(matches!(
+            inspect(&trailing),
+            Err(ContainerError::InvalidContainerLength { .. })
+        ));
+        let mut truncated = packed(Profile::Fast);
+        truncated.pop();
+        assert!(matches!(
+            inspect(&truncated),
+            Err(ContainerError::InvalidContainerLength { .. })
+        ));
+    }
+
+    #[test]
+    fn digests_and_reclassified_metadata_fail_closed() {
+        let config_digest = corrupt_raw(packed(Profile::Fast), 56);
+        assert!(matches!(
+            inspect(&config_digest),
+            Err(ContainerError::HeaderIntegrity)
+        ));
+        let original_digest = corrupt_raw(packed(Profile::Fast), 88);
+        assert!(matches!(
+            verify(&original_digest),
+            Err(ContainerError::OriginalIntegrity)
+        ));
+        let payload_digest = corrupt_raw(packed(Profile::Fast), 120);
+        assert!(matches!(
+            inspect(&payload_digest),
+            Err(ContainerError::PayloadIntegrity)
+        ));
+
+        let mut entry_point = packed(Profile::Fast);
+        mutate_header(&mut entry_point, |header| {
+            header.binary.entry_point ^= 1;
+        });
+        assert!(matches!(
+            verify(&entry_point),
+            Err(ContainerError::MetadataMismatch("entry_point"))
+        ));
+        let mut load_segments = packed(Profile::Fast);
+        mutate_header(&mut load_segments, |header| {
+            header.binary.load_segments += 1;
+        });
+        assert!(matches!(
+            verify(&load_segments),
+            Err(ContainerError::MetadataMismatch("load_segments"))
+        ));
+        let mut original_length = packed(Profile::Fast);
+        mutate_header(&mut original_length, |header| {
+            header.original_size += 1;
+        });
+        assert!(matches!(
+            verify(&original_length),
+            Err(ContainerError::OriginalLength { .. })
+        ));
+    }
+
+    #[test]
+    fn truncated_codec_payloads_fail_with_decompression_diagnostic() {
+        for profile in [Profile::Fast, Profile::Balanced] {
+            let mut container = packed(profile);
+            let payload = container[HEADER_LEN..container.len() - 1].to_vec();
+            replace_payload(&mut container, &payload);
+            let error = verify(&container).unwrap_err();
+            assert!(matches!(
+                error,
+                ContainerError::Decompression(_) | ContainerError::OriginalLength { .. }
+            ));
+            assert_eq!(error.diagnostic().code, "PFG2003");
+        }
+    }
+
+    #[test]
+    fn oversized_zstd_window_is_rejected_before_decoder_allocation() {
+        let mut container = packed(Profile::Balanced);
+        let high_window_frame = [0x28, 0xb5, 0x2f, 0xfd, 0x00, 0x90, 0x01, 0x00, 0x00];
+        replace_payload(&mut container, &high_window_frame);
+        let error = verify(&container).unwrap_err();
+        assert!(matches!(
+            error,
+            ContainerError::DecoderWindowLimit {
+                actual: 268_435_456,
+                maximum: 134_217_728
+            }
+        ));
+        assert_eq!(error.diagnostic().code, "PFG3001");
+    }
+
+    #[test]
+    fn zstd_window_parser_covers_streaming_and_single_segment_frames() {
+        let streaming = [0x28, 0xb5, 0x2f, 0xfd, 0x00, 0x90];
+        assert_eq!(zstd_window_size(&streaming), Some(268_435_456));
+
+        let mut single = vec![0x28, 0xb5, 0x2f, 0xfd, 0xa0];
+        single.extend_from_slice(&200_000_000u32.to_le_bytes());
+        assert_eq!(zstd_window_size(&single), Some(200_000_000));
+    }
+
+    #[test]
+    fn decoder_output_reservation_failure_is_recoverable() {
+        let error = allocate_lz4_output(usize::MAX, u64::MAX).unwrap_err();
+        assert!(matches!(
+            error,
+            ContainerError::Allocation {
+                field: "LZ4 decoder output",
+                requested: u64::MAX
+            }
+        ));
+        assert_eq!(error.diagnostic().code, "PFG3001");
+    }
+
+    #[test]
+    fn original_mode_is_normalized_to_documented_bits() {
+        let artifact = pack(
+            &fixture(),
+            u32::MAX,
+            PackOptions {
+                profile: Profile::Fast,
+                allow_larger: true,
+            },
+        )
+        .unwrap();
+        assert_eq!(artifact.info.original_mode, 0o7777);
+        assert_eq!(inspect(&artifact.bytes).unwrap().original_mode, 0o7777);
     }
 
     #[test]

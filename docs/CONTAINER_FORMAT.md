@@ -23,7 +23,7 @@ header followed immediately by one compressed payload. Trailing data is invalid.
 | 18 | 2 | ELF machine | `62` for x86-64 |
 | 20 | 2 | ELF type | `2` for `ET_EXEC` |
 | 22 | 2 | load-segment count | nonzero |
-| 24 | 4 | original Unix mode | permission and special bits only |
+| 24 | 4 | original Unix mode | permission and special bits only (`0o7777` mask) |
 | 28 | 4 | signed codec level | zero for LZ4; Zstandard level otherwise |
 | 32 | 8 | original length | bounded to 1 GiB in M1 |
 | 40 | 8 | payload length | bounded to 1 GiB + 64 MiB in M1 |
@@ -51,6 +51,17 @@ Readers must validate in this order:
 
 `inspect` stops after step 7. `verify` and `unpack` perform all steps. None of these
 operations executes the original payload.
+
+The LZ4 output buffer uses fallible reservation before initialization, so a host
+memory limit becomes a recoverable resource diagnostic rather than an allocator
+abort. Zstandard frames are inspected before decoder construction and may declare
+at most a 128 MiB window (`windowLog <= 27`), including single-segment frames.
+Decoder output is additionally capped to `original_length + 1` while streaming.
+
+Profile/codec combinations are part of the integrity-checked format contract:
+`fast` is LZ4 level 0, `balanced` is Zstandard level 3, `small` is Zstandard level
+19, and `auto` may contain only one of those three candidates. Other combinations
+fail closed even when every digest is recomputed.
 
 ## Determinism
 

@@ -21,6 +21,13 @@ doc = false
 bench = false
 
 [[bin]]
+name = "container_decompressor"
+path = "fuzz_targets/container_decompressor.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
 name = "runtime_lz4"
 path = "fuzz_targets/runtime_lz4.rs"
 test = false

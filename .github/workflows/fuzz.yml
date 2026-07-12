@@ -26,7 +26,7 @@ jobs:
           [[ "$FUZZ_SECONDS" =~ ^[0-9]+$ ]]
           test "$FUZZ_SECONDS" -ge 1
           test "$FUZZ_SECONDS" -le 3600
-          for target in artifact_parsers manifest_parser runtime_lz4 runtime_hash; do
+          for target in artifact_parsers container_decompressor manifest_parser runtime_lz4 runtime_hash; do
             cargo fuzz run "$target" -- \
               -max_total_time="$FUZZ_SECONDS" \
               -max_len=1048576
