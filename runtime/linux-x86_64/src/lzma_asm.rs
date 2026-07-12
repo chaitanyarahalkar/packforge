@@ -113,39 +113,20 @@ pub fn decompress(
         temporary_size: 0,
         temporary: [0; 20],
     };
-    let result: i32;
-    unsafe {
-        asm!(
-            "call LzmaDec_DecodeReal_3",
-            in("rdi") &mut decoder,
-            in("rsi") output.len(),
-            in("rdx") input.as_ptr().add(input.len()),
-            lateout("eax") result,
-            clobber_abi("C"),
-        );
-    }
-    let consumed = unsafe { decoder.input.offset_from(input.as_ptr()) };
+    let result =
+        unsafe { decode_real(&mut decoder, output.len(), input.as_ptr().add(input.len())) };
     if result != 0 {
         return Err(DecodeError(3));
     }
-    if decoder.dictionary_position < output.len()
-        && (1..=MAX_MATCH_REMAINDER).contains(&decoder.remaining_length)
-    {
-        let distance = decoder.repetitions[0] as usize;
-        if distance == 0 || distance > decoder.dictionary_position {
+    finish_remaining(&mut decoder, output.len())?;
+    if decoder.dictionary_position < output.len() && decoder.remaining_length == 0 {
+        let padding = [0u8; 21];
+        decoder.input = padding.as_ptr();
+        let result = unsafe { decode_real(&mut decoder, output.len(), padding.as_ptr().add(1)) };
+        if result != 0 {
             return Err(DecodeError(3));
         }
-        let mut position = decoder.dictionary_position;
-        let mut remaining = decoder.remaining_length;
-        while position < output.len() && remaining != 0 {
-            unsafe {
-                *decoder.dictionary.add(position) = *decoder.dictionary.add(position - distance);
-            }
-            position += 1;
-            remaining -= 1;
-        }
-        decoder.dictionary_position = position;
-        decoder.remaining_length = remaining;
+        finish_remaining(&mut decoder, output.len())?;
     }
     if decoder.dictionary_position != output.len() {
         return Err(DecodeError(4));
@@ -156,14 +137,45 @@ pub fn decompress(
     if decoder.remaining_length > MAX_MATCH_REMAINDER {
         return Err(DecodeError(6));
     }
-    if consumed < 0 {
-        return Err(DecodeError(7));
-    }
-    if usize::try_from(consumed)
-        .ok()
-        .is_none_or(|used| used > input.len().saturating_add(20))
-    {
-        return Err(DecodeError(8));
+    Ok(())
+}
+
+fn finish_remaining(decoder: &mut Decoder, output_limit: usize) -> Result<(), DecodeError> {
+    if decoder.dictionary_position < output_limit && decoder.remaining_length != 0 {
+        if decoder.remaining_length > MAX_MATCH_REMAINDER {
+            return Err(DecodeError(6));
+        }
+        let distance = decoder.repetitions[0] as usize;
+        if distance == 0 || distance > decoder.dictionary_position {
+            return Err(DecodeError(3));
+        }
+        let mut position = decoder.dictionary_position;
+        let mut remaining = decoder.remaining_length;
+        while position < output_limit && remaining != 0 {
+            unsafe {
+                *decoder.dictionary.add(position) = *decoder.dictionary.add(position - distance);
+            }
+            position += 1;
+            remaining -= 1;
+        }
+        decoder.dictionary_position = position;
+        decoder.remaining_length = remaining;
     }
     Ok(())
+}
+
+#[inline(never)]
+unsafe fn decode_real(decoder: &mut Decoder, output_limit: usize, input_limit: *const u8) -> i32 {
+    let result: i32;
+    unsafe {
+        asm!(
+            "call LzmaDec_DecodeReal_3",
+            in("rdi") decoder,
+            in("rsi") output_limit,
+            in("rdx") input_limit,
+            lateout("eax") result,
+            clobber_abi("C"),
+        );
+    }
+    result
 }
