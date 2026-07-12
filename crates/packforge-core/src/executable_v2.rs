@@ -499,20 +499,54 @@ fn validate_direct_output_layout(manifest: &ManifestV0) -> Result<(), Executable
         .segments
         .first()
         .ok_or(ExecutableV2Error::UnsupportedDirectOutputLayout)?;
-    let load_bias = first
+    let file_start = first
         .virtual_address
         .checked_sub(first.file_offset)
         .ok_or(ExecutableV2Error::UnsupportedDirectOutputLayout)?;
-    if load_bias < PAGE_SIZE || load_bias & (PAGE_SIZE - 1) != 0 {
+    if file_start < PAGE_SIZE || file_start & (PAGE_SIZE - 1) != 0 {
         return Err(ExecutableV2Error::UnsupportedDirectOutputLayout);
     }
-    let mut end = load_bias
+    let mut start = file_start;
+    let mut end = file_start
         .checked_add(manifest.original_size)
         .ok_or(ExecutableV2Error::UnsupportedDirectOutputLayout)?;
+    let mut previous_map_end = 0u64;
+    let mut previous_source_end = 0u64;
+    let mut forward_destination_end = 0u64;
     for segment in &manifest.segments {
-        if segment.virtual_address.checked_sub(segment.file_offset) != Some(load_bias) {
+        let map_start = segment.virtual_address & !(PAGE_SIZE - 1);
+        let map_end = segment
+            .virtual_address
+            .checked_add(segment.memory_size)
+            .and_then(|value| value.checked_add(PAGE_SIZE - 1))
+            .map(|value| value & !(PAGE_SIZE - 1))
+            .ok_or(ExecutableV2Error::UnsupportedDirectOutputLayout)?;
+        let source_start = file_start
+            .checked_add(segment.file_offset)
+            .ok_or(ExecutableV2Error::UnsupportedDirectOutputLayout)?;
+        let source_end = source_start
+            .checked_add(segment.file_size)
+            .ok_or(ExecutableV2Error::UnsupportedDirectOutputLayout)?;
+        let destination_end = segment
+            .virtual_address
+            .checked_add(segment.file_size)
+            .ok_or(ExecutableV2Error::UnsupportedDirectOutputLayout)?;
+        if map_start < previous_map_end
+            || source_start < previous_source_end
+            || forward_destination_end > source_start
+            || (segment.virtual_address < source_start
+                && segment.virtual_address < previous_source_end)
+        {
             return Err(ExecutableV2Error::UnsupportedDirectOutputLayout);
         }
+        forward_destination_end = if segment.virtual_address > source_start {
+            destination_end
+        } else {
+            0
+        };
+        previous_map_end = map_end;
+        previous_source_end = source_end;
+        start = start.min(map_start);
         end = end.max(
             segment
                 .virtual_address
@@ -525,7 +559,7 @@ fn validate_direct_output_layout(manifest: &ManifestV0) -> Result<(), Executable
         .map(|value| value & !(PAGE_SIZE - 1))
         .ok_or(ExecutableV2Error::UnsupportedDirectOutputLayout)?;
     let length = end
-        .checked_sub(load_bias)
+        .checked_sub(start)
         .ok_or(ExecutableV2Error::UnsupportedDirectOutputLayout)?;
     if length == 0 || length > MAX_ORIGINAL_SIZE {
         return Err(ExecutableV2Error::UnsupportedDirectOutputLayout);
@@ -865,7 +899,7 @@ mod tests {
     }
 
     #[test]
-    fn rejects_inconsistent_or_oversized_direct_output_spans() {
+    fn accepts_page_shifted_segments_and_rejects_oversized_direct_output_spans() {
         let mut manifest = ManifestV0 {
             original_size: 0x3000,
             entry_point: 0x0040_0100,
@@ -890,10 +924,20 @@ mod tests {
         };
         assert!(validate_direct_output_layout(&manifest).is_ok());
         manifest.segments[1].virtual_address = 0x0040_3000;
+        assert!(validate_direct_output_layout(&manifest).is_ok());
+        manifest.segments.push(ManifestSegment {
+            file_offset: 0x3000,
+            file_size: 0x1000,
+            virtual_address: 0x0040_5000,
+            memory_size: 0x1000,
+            alignment: 0x1000,
+            flags: 4,
+        });
         assert!(matches!(
             validate_direct_output_layout(&manifest),
             Err(ExecutableV2Error::UnsupportedDirectOutputLayout)
         ));
+        manifest.segments.pop();
         manifest.segments[1].file_offset = MAX_ORIGINAL_SIZE;
         manifest.segments[1].virtual_address = 0x0040_0000 + MAX_ORIGINAL_SIZE;
         assert!(matches!(

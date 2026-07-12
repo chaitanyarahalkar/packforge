@@ -104,6 +104,7 @@ pub struct ElfInfo {
 pub struct OutputLayout {
     pub start: u64,
     pub length: u64,
+    pub file_start: u64,
 }
 
 pub fn parse_trailer(bytes: &[u8; TRAILER_LEN], file_length: u64) -> Result<Trailer, Error> {
@@ -317,24 +318,51 @@ pub fn parse_manifest(input: &[u8], expected_original_size: u64) -> Result<Manif
 
 pub fn direct_output_layout(manifest: &Manifest) -> Result<OutputLayout, Error> {
     let first = manifest.segments.first().ok_or(Error::Manifest)?;
-    let load_bias = first
+    let file_start = first
         .virtual_address
         .checked_sub(first.file_offset)
         .ok_or(Error::Range)?;
-    if load_bias < PAGE_SIZE || load_bias & (PAGE_SIZE - 1) != 0 {
+    if file_start < PAGE_SIZE || file_start & (PAGE_SIZE - 1) != 0 {
         return Err(Error::Manifest);
     }
-    let mut end = load_bias
+    let mut start = file_start;
+    let mut end = file_start
         .checked_add(manifest.original_size)
         .ok_or(Error::Range)?;
+    let mut previous_map_end = 0u64;
+    let mut previous_source_end = 0u64;
+    let mut forward_destination_end = 0u64;
     for segment in manifest.segments.iter().take(manifest.count) {
-        if segment
+        let source_start = file_start
+            .checked_add(segment.file_offset)
+            .ok_or(Error::Range)?;
+        let source_end = source_start
+            .checked_add(segment.file_size)
+            .ok_or(Error::Range)?;
+        let map_end = segment
+            .map_start
+            .checked_add(segment.map_length)
+            .ok_or(Error::Range)?;
+        let destination_end = segment
             .virtual_address
-            .checked_sub(segment.file_offset)
-            != Some(load_bias)
+            .checked_add(segment.file_size)
+            .ok_or(Error::Range)?;
+        if segment.map_start < previous_map_end
+            || source_start < previous_source_end
+            || forward_destination_end > source_start
+            || (segment.virtual_address < source_start
+                && segment.virtual_address < previous_source_end)
         {
-            return Err(Error::Manifest);
+            return Err(Error::Overlap);
         }
+        forward_destination_end = if segment.virtual_address > source_start {
+            destination_end
+        } else {
+            0
+        };
+        previous_map_end = map_end;
+        previous_source_end = source_end;
+        start = start.min(segment.map_start);
         end = end.max(
             segment
                 .virtual_address
@@ -343,13 +371,14 @@ pub fn direct_output_layout(manifest: &Manifest) -> Result<OutputLayout, Error> 
         );
     }
     end = align_up(end, PAGE_SIZE)?;
-    let length = end.checked_sub(load_bias).ok_or(Error::Range)?;
+    let length = end.checked_sub(start).ok_or(Error::Range)?;
     if length == 0 || length > MAX_ORIGINAL_SIZE {
         return Err(Error::Range);
     }
     Ok(OutputLayout {
-        start: load_bias,
+        start,
         length,
+        file_start,
     })
 }
 
@@ -520,12 +549,12 @@ mod tests {
             manifest[offset + 40..offset + 44].copy_from_slice(&flags.to_le_bytes());
         }
         let parsed = parse_manifest(&manifest, 0x3000).unwrap();
-        assert_eq!(direct_output_layout(&parsed).unwrap().start, 0x400000);
+        assert_eq!(direct_output_layout(&parsed).unwrap().file_start, 0x400000);
 
         manifest[MANIFEST_HEADER_LEN + MANIFEST_SEGMENT_LEN + 16
             ..MANIFEST_HEADER_LEN + MANIFEST_SEGMENT_LEN + 24]
             .copy_from_slice(&0x403000u64.to_le_bytes());
         let parsed = parse_manifest(&manifest, 0x3000).unwrap();
-        assert_eq!(direct_output_layout(&parsed), Err(Error::Manifest));
+        assert_eq!(direct_output_layout(&parsed).unwrap().file_start, 0x400000);
     }
 }

@@ -179,7 +179,8 @@ unsafe fn run(
     let original_length = usize::try_from(header.original_length)
         .map_err(|_| b"packforge: v2 original is too large\n" as &'static [u8])?;
     let output_layout = v2_format::direct_output_layout(&manifest).map_err(format_error_message)?;
-    let original_mapping = reserve_output(output_layout)?;
+    reserve_output(output_layout)?;
+    let original_mapping = output_layout.file_start as *mut u8;
     let original = unsafe { slice::from_raw_parts_mut(original_mapping, original_length) };
     let report = lzma::decompress(payload, &header.properties, original)
         .map_err(|_| b"packforge: v2 LZMA1 decompression failed\n" as &'static [u8])?;
@@ -222,7 +223,7 @@ fn verify_file_range(
     result
 }
 
-fn reserve_output(layout: OutputLayout) -> Result<*mut u8, &'static [u8]> {
+fn reserve_output(layout: OutputLayout) -> Result<(), &'static [u8]> {
     let address = usize::try_from(layout.start)
         .map_err(|_| b"packforge: target mapping is out of range\n" as &'static [u8])?;
     let length = usize::try_from(layout.length)
@@ -242,11 +243,26 @@ fn reserve_output(layout: OutputLayout) -> Result<*mut u8, &'static [u8]> {
         }
         return Err(b"packforge: target address collision\n");
     }
-    Ok(mapped as *mut u8)
+    Ok(())
 }
 
 fn finalize_output(layout: OutputLayout, manifest: &Manifest) -> Result<(), &'static [u8]> {
     for segment in manifest.segments.iter().take(manifest.count) {
+        let source = layout
+            .file_start
+            .checked_add(segment.file_offset)
+            .ok_or(b"packforge: target source is out of range\n" as &'static [u8])?;
+        if source != segment.virtual_address {
+            let length = usize::try_from(segment.file_size)
+                .map_err(|_| b"packforge: target source is out of range\n" as &'static [u8])?;
+            unsafe {
+                relocate(
+                    segment.virtual_address as *mut u8,
+                    source as *const u8,
+                    length,
+                );
+            }
+        }
         let zero_start = segment
             .virtual_address
             .checked_add(segment.file_size)
@@ -263,14 +279,7 @@ fn finalize_output(layout: OutputLayout, manifest: &Manifest) -> Result<(), &'st
         .checked_add(layout.length)
         .ok_or(b"packforge: target mapping is out of range\n" as &'static [u8])?;
     let mut cursor = layout.start;
-    for _ in 0..manifest.count {
-        let segment = manifest
-            .segments
-            .iter()
-            .take(manifest.count)
-            .filter(|segment| segment.map_start >= cursor)
-            .min_by_key(|segment| segment.map_start)
-            .ok_or(b"packforge: invalid target mapping order\n" as &'static [u8])?;
+    for segment in manifest.segments.iter().take(manifest.count) {
         if segment.map_start > cursor {
             let _ = syscall2(
                 SYS_MUNMAP,
@@ -443,6 +452,11 @@ const fn is_error(result: isize) -> bool {
 
 #[unsafe(no_mangle)]
 unsafe extern "C" fn memmove(destination: *mut u8, source: *const u8, count: usize) -> *mut u8 {
+    unsafe { relocate(destination, source, count) }
+}
+
+#[inline(never)]
+unsafe fn relocate(destination: *mut u8, source: *const u8, count: usize) -> *mut u8 {
     if (destination as usize) <= (source as usize) {
         for index in 0..count {
             let byte = unsafe { ptr::read_volatile(source.add(index)) };
