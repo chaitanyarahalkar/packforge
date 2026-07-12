@@ -175,6 +175,12 @@ fn parent_output(left: [u32; 8], right: [u32; 8]) -> Output {
 #[cfg(feature = "lzma")]
 fn words_from_block(block: &[u8]) -> [u32; 16] {
     let mut words = [0u32; 16];
+    if block.len() == BLOCK_LEN {
+        for (word, bytes) in words.iter_mut().zip(block.chunks_exact(4)) {
+            *word = u32::from_le_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]);
+        }
+        return words;
+    }
     for (word_index, word) in words.iter_mut().enumerate() {
         let byte_index = word_index * 4;
         let mut bytes = [0u8; 4];

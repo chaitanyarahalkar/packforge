@@ -44,6 +44,7 @@ asm_object_output="${PACKFORGE_ASM_OBJECT_OUTPUT:-}"
 brotli_output="${PACKFORGE_BROTLI_OUTPUT:-}"
 apultra_bcj2_output="${PACKFORGE_APULTRA_BCJ2_OUTPUT:-}"
 force_codec4="${PACKFORGE_BENCHMARK_CODEC4:-0}"
+runtime_candidate="${PACKFORGE_BENCHMARK_RUNTIME_CANDIDATE:-0}"
 if ! [[ "$phase_iterations" =~ ^[0-9]+$ ]] || \
     (( phase_iterations < 0 || phase_iterations > 21 )); then
     printf 'PACKFORGE_PHASE_ITERATIONS must be from 0 through 21\n' >&2
@@ -51,6 +52,10 @@ if ! [[ "$phase_iterations" =~ ^[0-9]+$ ]] || \
 fi
 if [[ "$force_codec4" != "0" && "$force_codec4" != "1" ]]; then
     printf 'PACKFORGE_BENCHMARK_CODEC4 must be 0 or 1\n' >&2
+    exit 2
+fi
+if [[ "$runtime_candidate" != "0" && "$runtime_candidate" != "1" ]]; then
+    printf 'PACKFORGE_BENCHMARK_RUNTIME_CANDIDATE must be 0 or 1\n' >&2
     exit 2
 fi
 if [[ -n "$raw_samples" ]]; then
@@ -92,7 +97,19 @@ tar -xJf "$upx_archive" -C "$scratch"
 upx="$scratch/upx-$upx_version-amd64_linux/upx"
 test "$("$upx" --version | head -1)" = "upx $upx_version"
 
-"$workspace/scripts/build-runtime-v2.sh" --check >/dev/null
+if [[ "$runtime_candidate" == "1" ]]; then
+    PACKFORGE_RUNTIME_V2_DECODER=parallel \
+    PACKFORGE_RUNTIME_V2_HASH=compact-four-optz \
+    PACKFORGE_RUNTIME_V2_OUTPUT="$workspace/runtime/artifacts/linux-x86_64/loader-v2" \
+        "$workspace/scripts/build-runtime-v2.sh" --candidate >/dev/null
+    PACKFORGE_RUNTIME_V2_DECODER=apultra-bcj2 \
+    PACKFORGE_RUNTIME_V2_DECODER_OPT_LEVEL=2 \
+    PACKFORGE_RUNTIME_V2_HASH=compact-optz \
+    PACKFORGE_RUNTIME_V2_OUTPUT="$workspace/runtime/artifacts/linux-x86_64/loader-v2-codec5" \
+        "$workspace/scripts/build-runtime-v2.sh" --candidate >/dev/null
+else
+    "$workspace/scripts/build-runtime-v2.sh" --check >/dev/null
+fi
 cargo build --release --locked -p packforge-cli >/dev/null
 if [[ "$force_codec4" == "1" ]]; then
     cargo build --release --locked -p packforge-core --example m2_codec4_pack >/dev/null
