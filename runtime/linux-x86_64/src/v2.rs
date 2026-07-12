@@ -44,6 +44,9 @@ const AT_BASE: usize = 7;
 const AT_ENTRY: usize = 9;
 const AUX_REQUIRED: u8 = 0x0f;
 
+#[unsafe(link_section = ".rodata.packforge.000_panic")]
+static PANIC_MESSAGE: [u8; 28] = *b"packforge: v2 runtime panic\n";
+
 global_asm!(
     r#"
     .hidden memcpy
@@ -82,8 +85,9 @@ _start:
 #[panic_handler]
 #[cold]
 #[inline(never)]
+#[unsafe(link_section = ".text.packforge.000_panic")]
 fn panic(_info: &PanicInfo<'_>) -> ! {
-    fail(b"packforge: v2 runtime panic\n")
+    fail(&PANIC_MESSAGE)
 }
 
 #[unsafe(no_mangle)]
