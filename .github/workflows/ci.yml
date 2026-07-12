@@ -28,18 +28,6 @@ jobs:
         run: cargo clippy --workspace --all-targets -- -D warnings
       - name: Test
         run: cargo test --workspace --locked
-      - name: Install dependency auditor
-        run: cargo install cargo-audit --version 0.22.2 --locked
-      - name: Audit every shipped and test lockfile
-        run: |
-          for lockfile in \
-            Cargo.lock \
-            fuzz/Cargo.lock \
-            runtime/linux-x86_64/Cargo.lock \
-            runtime/lzma-spike/Cargo.lock \
-            runtime/zstd-spike/Cargo.lock; do
-            cargo audit --deny warnings --file "$lockfile"
-          done
       - name: Benchmark contract
         run: |
           python3 scripts/benchmark_contract.py validate-corpus
@@ -84,6 +72,18 @@ jobs:
             target/container-corpus/inputs/hello-go
       - name: Self-contained executable round trip
         run: bash scripts/ci-linux-executable-smoke.sh
+      - name: Install dependency auditor
+        run: cargo install cargo-audit --version 0.22.2 --locked
+      - name: Audit every shipped and test lockfile
+        run: |
+          for lockfile in \
+            Cargo.lock \
+            fuzz/Cargo.lock \
+            runtime/linux-x86_64/Cargo.lock \
+            runtime/lzma-spike/Cargo.lock \
+            runtime/zstd-spike/Cargo.lock; do
+            cargo audit --deny warnings --file "$lockfile"
+          done
       - name: Archive deterministic container corpus
         run: tar -C target/container-corpus -cf target/container-corpus/corpus.tar inputs
       - uses: actions/upload-artifact@v4
