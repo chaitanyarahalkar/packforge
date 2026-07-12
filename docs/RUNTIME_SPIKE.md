@@ -1,10 +1,8 @@
 # Linux x86-64 runtime spike
 
-**Status:** implementation and native CI compatibility testing in progress. The
-current freestanding Rust loader is reproducibly built below the 32 KiB budget,
-the host packer emits the wrapper specified in `EXECUTABLE_FORMAT.md`, and the
-C/C++/Rust/Go differential corpus plus process-semantics fixture execute through
-the diskless runtime path.
+**Status: superseded by executable v2.** This document records the legacy v1
+compatibility launcher. V1 remains inspectable and recoverable, but new executable
+output uses the direct in-process loader in `plans/M2_DIRECT_RUNTIME.md`.
 
 This spike tests an experimental diskless compatibility launcher before Packforge
 commits to an in-process ELF loader. It is not the final M2 native runtime tier and

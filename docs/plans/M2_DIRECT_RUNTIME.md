@@ -1,8 +1,9 @@
 # M2 direct runtime implementation plan
 
-**Status: planned; implementation begins only after executable v2 host framing
-passes native CI.** This is the runtime phase of the broader M2 plan. It does not
-change the M2 release gates or expand the supported input tier.
+**Status: implemented and compatibility-verified; M2 performance gate failed.**
+The direct runtime passes the two-runner ASLR matrix, syscall traces, fuzzing, and
+the four-language/behavior corpus. The 2026-07-11 release campaign passes size and
+RSS gates but fails cold startup at 389.50% of UPX, so M2 remains open.
 
 ## Runtime artifact contract
 

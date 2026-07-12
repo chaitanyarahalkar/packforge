@@ -28,24 +28,24 @@ runtime stub + manifest + compressed segments + recovery metadata
 - `packforge-core::container`: versioned header, codecs, integrity, reconstruction,
   and deterministic profile selection.
 - `packforge-core` host operations: bounded reads and atomic no-clobber writes.
-- `runtime/linux-x86_64`: independently built freestanding loader, compact BLAKE3,
-  bounded LZ4 decoder, and target-specific syscall logic.
+- `runtime/linux_x86_64`: independently built freestanding loaders, compact
+  BLAKE3, bounded LZ4/LZMA1 decoders, direct ELF mapping, and target-specific
+  syscall logic.
 - `runtime/artifacts`: reproducible versioned loader binaries embedded by the host
   packer and checked byte-for-byte in Linux CI.
 
-The active loader feasibility work is specified in the
-[Linux x86-64 runtime spike](RUNTIME_SPIKE.md). Its diskless `memfd_create` plus
-`execveat` path is an experimental compatibility launcher, not a substitute for
-the final format-aware M2 loader.
+Executable v1's historical `memfd_create` plus `execveat` launcher remains
+readable and recoverable. New executable output uses the format-aware v2 loader
+specified in the [direct-runtime plan](plans/M2_DIRECT_RUNTIME.md).
 
 ## Packed artifact model
 
-The output remains a valid native executable. The current compatibility launcher
-validates and reconstructs the complete original image in bounded non-executable
-memory, writes it to a sealed executable `memfd`, and delegates final ELF loading
-to the kernel through `execveat`. A future format-aware loader would instead
-reconstruct load segments, apply an explicit relocation subset, finalize memory
-permissions, and transfer control to the original entry point.
+The output remains a valid native executable. Loader v2 authenticates its trailer,
+image header, canonical segment manifest, and compressed payload; reconstructs
+the bounded original in anonymous staging memory; reserves collision-safe target
+ranges with `MAP_FIXED_NOREPLACE`; copies `PT_LOAD` bytes; applies final W^X
+permissions; repairs target-owned auxiliary-vector entries; and jumps directly
+to the original entry point. It creates no memfd and performs no secondary exec.
 
 The M1 container is deliberately non-executable: it proves deterministic packing,
 inspection, verification, and byte-identical recovery before runtime code is
@@ -57,7 +57,7 @@ different.
 
 ## Manifest v0 design constraints
 
-The manifest will contain:
+The executable v2 manifest contains:
 
 - format magic and independently versioned schema;
 - target architecture and compatibility tier;

@@ -41,30 +41,26 @@ containers fail closed.
 
 ## M2 — Linux ELF x86-64 static executables
 
-**Status: in progress.** The fixed v1 executable trailer, host-side
-wrapping/inspection/verification/recovery path, freestanding LZ4 runtime, and
-native Linux CI smoke gate are implemented. Static C, C++, Rust/musl, and Go
-fixtures pass byte-identical recovery and execution equivalence; the behavioral
-fixture also covers cwd, inherited descriptors, output, file effects, status,
-and signals. Native kernel-matrix and final performance gates remain before
-executable output becomes the default. The `ruzstd` 0.8.3 experiment decoded the
-balanced payload correctly but added 59,936 bytes over its static I/O baseline,
-so it was rejected rather than integrated.
+**Status: in progress; performance gate failed.** Executable v2 now ships a
+17,360-byte relocation-free `ET_DYN` loader with authenticated raw-LZMA1 framing,
+canonical manifest verification, collision-safe W^X `PT_LOAD` mapping, auxv
+repair, and direct entry transfer. Static C, C++, Rust/musl, Go, and process
+semantics pass on Ubuntu 22.04 and 24.04 runner families with full ASLR. Syscall
+evidence contains one initial exec and no memfd or secondary exec.
 
-The performance-first v2 design, 23,500-byte compact-codec go/no-go budget,
-direct in-process ELF mapping sequence, and strict requirement to beat UPX in
-both median size and cold startup are specified in `plans/M2.md` before further
-runtime changes. The admitted raw-LZMA1 candidate produces a 14,776-byte
-feature-retained loader and passes the pinned native projection at 95.18% median
-size versus UPX, with every fixture within 105%. Executable v2 framing and
-canonical manifest host round trips are now under implementation.
+The final native campaign beats pinned UPX 5.2.0 `--best` on median packed size
+(96.02% of UPX) and passes the per-fixture size, RSS, correctness, reversibility,
+determinism, and direct-mapping gates. It does not close M2: median cold startup
+is 389.50% of UPX. The exact failing result is preserved under
+`benchmarks/results/m2-linux-x86_64-2026-07-11/` and must guide the next decoder
+and verification-path optimization work.
 
 - Implement the smallest native runtime stub.
 - Support a documented static, non-PIE `ET_EXEC` subset.
 - Enforce W^X and payload integrity at runtime.
 - Differential-test behavior in isolated runners.
-- Ship fast first; balanced, small, and auto executable profiles require a
-  bounded decoder that passes the same runtime size gate.
+- Optimize the balanced LZMA1 startup path without weakening verification,
+  deterministic output, direct mapping, or the loader size bound.
 
 **Exit:** all stable-tier fixtures execute equivalently and meet the M2 release
 gates in `PRODUCT.md`.

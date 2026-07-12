@@ -1,0 +1,48 @@
+{
+  "artifact_kind": "executable",
+  "schema_version": 1,
+  "executable_version": 2,
+  "runtime_abi_version": 2,
+  "verification": "payload",
+  "loader_size": 17360,
+  "manifest_size": 184,
+  "payload_size": 586571,
+  "original_size": 1597566,
+  "executable_size": 604435,
+  "original_mode": 493,
+  "trailing_bytes": 0,
+  "loader_digest": "a8fcab276febda8d3535169e181b9763ebdf877e3e52e12c0c96cbe34c7bed7d",
+  "manifest_digest": "36f3eb8913f0fb7deec3b2adfaf15f7693c80a5b0689b7db1119222093dc5df1",
+  "payload_digest": "736afef34c156d5eb0aec36589323467802266c1a673609673e0a1850c8edf6f",
+  "original_digest": "a59792464641f3ca70cbd65437a259c03a10267cdf7250987c52de62b873aca9",
+  "manifest": {
+    "original_size": 1597566,
+    "entry_point": 4720544,
+    "segments": [
+      {
+        "file_offset": 0,
+        "file_size": 656561,
+        "virtual_address": 4194304,
+        "memory_size": 656561,
+        "alignment": 4096,
+        "flags": 5
+      },
+      {
+        "file_offset": 659456,
+        "file_size": 892552,
+        "virtual_address": 4853760,
+        "memory_size": 892552,
+        "alignment": 4096,
+        "flags": 4
+      },
+      {
+        "file_offset": 1552384,
+        "file_size": 42848,
+        "virtual_address": 5746688,
+        "memory_size": 262720,
+        "alignment": 4096,
+        "flags": 6
+      }
+    ]
+  }
+}

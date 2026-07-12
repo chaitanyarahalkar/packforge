@@ -1,0 +1,18 @@
+{
+  "correctness_pass": true,
+  "reversibility_pass": true,
+  "determinism_pass": true,
+  "loader_size_limit_bytes": 23500,
+  "loader_size_pass": true,
+  "median_size_packforge_over_upx_basis_points": 9602,
+  "all_size_within_105_percent": true,
+  "size_win_pass": true,
+  "median_cold_packforge_over_upx_basis_points": 38950,
+  "cold_win_pass": false,
+  "median_rss_packforge_over_upx_basis_points": 10202,
+  "rss_pass": true,
+  "direct_mapping_pass": true,
+  "no_memfd_pass": true,
+  "no_secondary_exec_pass": true,
+  "release_pass": false
+}

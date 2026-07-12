@@ -67,53 +67,39 @@ with checked-in inspect and verify examples.
 
 ## Packforge vs. UPX
 
-The first native Linux x86-64 benchmark was run on 2026-07-11 using a GitHub-hosted
-Ubuntu 24.04.4 runner. It compares Packforge's currently supported executable
-`fast` profile with UPX 5.2.0 `--best`. Every artifact executed successfully before
-measurement; values are medians from 21 warm runs after one warm-up.
+The direct-load v2 benchmark was run on 2026-07-11 using a native GitHub-hosted
+Linux x86-64 runner. It compares Packforge's `balanced` raw-LZMA1 executable with
+pinned UPX 5.2.0 `--best`. Every artifact passed behavior equivalence first;
+timings are medians from 21 warm runs and seven page-cache-reset cold runs.
 
 ### Packed size
 
-| Fixture | Original | Packforge | Packforge/original | UPX | UPX/original |
-| --- | ---: | ---: | ---: | ---: | ---: |
-| C | 785,304 B | 488,310 B | 62.18% | 308,912 B | 39.33% |
-| C++ | 785,304 B | 488,274 B | 62.17% | 308,908 B | 39.33% |
-| Rust | 438,400 B | 304,613 B | 69.48% | 196,196 B | 44.75% |
-| Go | 1,597,566 B | 1,015,850 B | 63.58% | 653,268 B | 40.89% |
-
-### Warm process time and peak RSS
-
-| Fixture | Original | Packforge | UPX | Packforge RSS | UPX RSS |
-| --- | ---: | ---: | ---: | ---: | ---: |
-| C | 1.97 ms | 11.01 ms | 7.57 ms | 1,736 KiB | 1,736 KiB |
-| C++ | 2.02 ms | 11.06 ms | 7.59 ms | 1,736 KiB | 1,736 KiB |
-| Rust | 1.86 ms | 7.18 ms | 5.73 ms | 1,736 KiB | 1,736 KiB |
-| Go | 2.95 ms | 21.69 ms | 12.88 ms | 3,752 KiB | 3,768 KiB |
-
-On this small corpus, Packforge reduces every original but trails UPX in packed
-size and warm startup. These are warm-start microbenchmarks from one hosted runner,
-not cold-start or universal performance claims. See the
-[complete method](docs/BENCHMARKING.md) and the
-[source CI run](https://github.com/chaitanyarahalkar/packforge/actions/runs/29171498154).
-
-### M2 size candidate
-
-The admitted raw-LZMA1 candidate now passes the pre-integration size gate on the
-same four fixtures. This projection includes the complete 14,776-byte
-feature-retained loader, the 192-byte v2 image header, actual manifest v0 size,
-and the 128-byte trailer.
-
-| Fixture | Projected Packforge v2 | UPX 5.2.0 `--best` | Packforge/UPX |
+| Fixture | Packforge v2 | UPX | Packforge/UPX |
 | --- | ---: | ---: | ---: |
-| C | 294,077 B | 308,912 B | 95.19% |
-| C++ | 294,002 B | 308,908 B | 95.17% |
-| Rust | 196,746 B | 196,196 B | 100.28% |
-| Go | 601,851 B | 653,268 B | 92.13% |
+| C | 296,661 B | 308,912 B | 96.03% |
+| C++ | 296,586 B | 308,908 B | 96.01% |
+| Rust | 199,330 B | 196,196 B | 101.59% |
+| Go | 604,435 B | 653,268 B | 92.52% |
 
-Median projected size is 95.18% of UPX and every fixture is below the 105% hard
-bound. This is a reproducible feasibility result, not a release benchmark: v2
-must still integrate the direct loader and beat UPX in measured cold startup.
-See the [native gate run](https://github.com/chaitanyarahalkar/packforge/actions/runs/29174191514).
+The median fixture ratio is 96.02%, so Packforge wins the aggregate size gate by
+3.98%. It is smaller for C, C++, and Go, while the Rust fixture is 1.59% larger;
+all four remain inside the 105% per-fixture bound.
+
+### Cold process time and peak RSS
+
+| Fixture | Packforge cold | UPX cold | Packforge RSS | UPX RSS |
+| --- | ---: | ---: | ---: | ---: |
+| C | 38.08 ms | 9.75 ms | 1,792 KiB | 1,736 KiB |
+| C++ | 38.08 ms | 9.80 ms | 1,792 KiB | 1,736 KiB |
+| Rust | 25.85 ms | 8.28 ms | 1,736 KiB | 1,736 KiB |
+| Go | 75.74 ms | 15.21 ms | 5,864 KiB | 5,816 KiB |
+
+Packforge does **not** beat UPX overall yet: median cold startup is 3.895x UPX,
+so the strict M2 release gate fails even though size, RSS, correctness,
+reversibility, determinism, W^X direct mapping, and zero-secondary-exec gates
+pass. See the [complete evidence](benchmarks/results/m2-linux-x86_64-2026-07-11/README.md),
+[method](docs/BENCHMARKING.md), and
+[source CI run](https://github.com/chaitanyarahalkar/packforge/actions/runs/29177085582).
 
 ## Project boundaries
 
