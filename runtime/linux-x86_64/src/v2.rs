@@ -229,8 +229,16 @@ unsafe fn run(
                     header.properties,
                     chunk.trailing_bytes,
                 )
-                .map_err(|_| {
-                    b"packforge: codec-4 LZMA1 decompression failed\n" as &'static [u8]
+                .map_err(|error| -> &'static [u8] {
+                    match error.0 {
+                        3 => b"packforge: codec-4 asm error 3\n",
+                        4 => b"packforge: codec-4 asm error 4\n",
+                        5 => b"packforge: codec-4 asm error 5\n",
+                        6 => b"packforge: codec-4 asm error 6\n",
+                        7 => b"packforge: codec-4 asm error 7\n",
+                        8 => b"packforge: codec-4 asm error 8\n",
+                        _ => b"packforge: codec-4 asm metadata error\n",
+                    }
                 })?;
             }
             bcj::decode(original)

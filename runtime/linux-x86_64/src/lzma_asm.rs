@@ -12,7 +12,7 @@ const BAD_INITIAL_CODE: u32 = 0xbfff_fc00;
 const MAX_MATCH_REMAINDER: u32 = 273;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct DecodeError;
+pub struct DecodeError(pub u8);
 
 #[repr(C)]
 struct Properties {
@@ -79,11 +79,11 @@ pub fn decompress(
         || properties[0] != 0x5d
         || expected_trailing > 5
     {
-        return Err(DecodeError);
+        return Err(DecodeError(1));
     }
     let code = u32::from_be_bytes([input[1], input[2], input[3], input[4]]);
     if code >= BAD_INITIAL_CODE {
-        return Err(DecodeError);
+        return Err(DecodeError(2));
     }
     let dictionary_size =
         u32::from_le_bytes([properties[1], properties[2], properties[3], properties[4]]);
@@ -127,16 +127,25 @@ pub fn decompress(
         );
     }
     let consumed = unsafe { decoder.input.offset_from(input.as_ptr()) };
-    if result != 0
-        || decoder.dictionary_position != output.len()
-        || decoder.state >= 12
-        || decoder.remaining_length > MAX_MATCH_REMAINDER
-        || consumed < 0
-        || usize::try_from(consumed).ok().is_none_or(|used| {
-            used > input.len() || input.len() - used > usize::from(expected_trailing)
-        })
-    {
-        return Err(DecodeError);
+    if result != 0 {
+        return Err(DecodeError(3));
+    }
+    if decoder.dictionary_position != output.len() {
+        return Err(DecodeError(4));
+    }
+    if decoder.state >= 12 {
+        return Err(DecodeError(5));
+    }
+    if decoder.remaining_length > MAX_MATCH_REMAINDER {
+        return Err(DecodeError(6));
+    }
+    if consumed < 0 {
+        return Err(DecodeError(7));
+    }
+    if usize::try_from(consumed).ok().is_none_or(|used| {
+        used > input.len() || input.len() - used > usize::from(expected_trailing)
+    }) {
+        return Err(DecodeError(8));
     }
     Ok(())
 }
