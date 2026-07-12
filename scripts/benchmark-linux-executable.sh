@@ -37,6 +37,12 @@ fi
 packer="$target_dir/release/packforge"
 raw_samples="${PACKFORGE_BENCHMARK_RAW:-}"
 runtime_traces="${PACKFORGE_RUNTIME_TRACES:-}"
+phase_iterations="${PACKFORGE_PHASE_ITERATIONS:-0}"
+if ! [[ "$phase_iterations" =~ ^[0-9]+$ ]] || \
+    (( phase_iterations < 0 || phase_iterations > 21 )); then
+    printf 'PACKFORGE_PHASE_ITERATIONS must be from 0 through 21\n' >&2
+    exit 2
+fi
 if [[ -n "$raw_samples" ]]; then
     printf 'fixture\tkind\tmetric\tsample\tvalue\n' > "$raw_samples"
 fi
@@ -213,6 +219,20 @@ for label in hello-c hello-cpp hello-rust hello-go; do
             -e trace=execve,execveat,memfd_create,mmap,mprotect,openat,pread64,write \
             -E PACKFORGE_SMOKE=benchmark \
             "$packforge" round-trip >/dev/null
+        if (( phase_iterations > 0 )); then
+            phase_traces=()
+            for ((phase_iteration = 0; phase_iteration < phase_iterations; phase_iteration++)); do
+                phase_trace="$runtime_traces/$label.phase-$phase_iteration.strace"
+                strace -f -qq -ttt -T -o "$phase_trace" \
+                    -e trace=execve,execveat,memfd_create,mmap,mprotect,openat,pread64,write \
+                    -E PACKFORGE_SMOKE=benchmark \
+                    "$packforge" round-trip >/dev/null
+                phase_traces+=("$phase_trace")
+            done
+            python3 "$workspace/scripts/runtime_phase_trace.py" \
+                "${phase_traces[@]}" \
+                --output "$runtime_traces/$label.phases.json"
+        fi
     fi
 
     original_size="$(stat -c %s "$original")"

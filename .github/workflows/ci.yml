@@ -162,6 +162,7 @@ jobs:
         env:
           PACKFORGE_BENCHMARK_RAW: benchmark-output/raw-samples.tsv
           PACKFORGE_RUNTIME_TRACES: benchmark-output/runtime-traces
+          PACKFORGE_PHASE_ITERATIONS: "7"
           PACKFORGE_DROP_CACHES: "1"
         run: |
           mkdir -p benchmark-output
