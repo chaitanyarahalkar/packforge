@@ -8,7 +8,7 @@ opt_level="${PACKFORGE_RUNTIME_V2_OPT_LEVEL:-z}"
 relocation_model="${PACKFORGE_RUNTIME_V2_RELOCATION_MODEL:-pic}"
 decoder_opt_level="${PACKFORGE_RUNTIME_V2_DECODER_OPT_LEVEL-3}"
 decoder_implementation="${PACKFORGE_RUNTIME_V2_DECODER:-parallel}"
-hash_implementation="${PACKFORGE_RUNTIME_V2_HASH:-compact-opt2}"
+hash_implementation="${PACKFORGE_RUNTIME_V2_HASH:-compact-optz}"
 artifact_name="loader-v2"
 size_limit=23500
 if [[ "$decoder_implementation" == "apultra-bcj2" ]]; then

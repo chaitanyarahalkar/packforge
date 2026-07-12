@@ -8,4 +8,4 @@ mod compact {
     include!("../../../runtime/linux-x86_64/src/hash.rs");
 }
 
-pub use compact::hash;
+pub use compact::{CHUNK_LEN, chunk_chaining_value, hash, hash_with_chunk_cvs};
