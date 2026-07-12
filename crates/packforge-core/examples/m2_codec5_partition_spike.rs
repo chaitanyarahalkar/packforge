@@ -1,4 +1,4 @@
-//! Host-only APultra MAIN-stream partition feasibility probe for M2.
+//! Host-only `APultra` MAIN-stream partition feasibility probe for M2.
 
 use std::{env, fs};
 
