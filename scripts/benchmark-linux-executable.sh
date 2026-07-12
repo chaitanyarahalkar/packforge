@@ -69,7 +69,7 @@ if [[ -n "$brotli_output" ]]; then
     printf 'fixture\tpayload_bytes\tmedian_decode_ns\tupx_ceiling_bytes\tmanifest_bytes\tmaximum_complete_loader_bytes\tdecoder_file_bytes\tdecoder_text_bytes\tdecoder_rodata_bytes\tdecoder_linked_lower_bound_bytes\tdecoder_lower_bound_fits\n' > "$brotli_output"
 fi
 if [[ -n "$apultra_bcj2_output" ]]; then
-    printf 'fixture\truntime_image_bytes\trecovery_tail_bytes\tpayload_bytes\tmedian_decode_ns\tupx_bytes\tupx_ceiling_bytes\tmaximum_loader_for_upx_bytes\tmaximum_loader_for_105_percent_bytes\tbare_loader_bytes\toracle_text_bytes\toracle_rodata_bytes\tlinked_loader_lower_bound_bytes\tprojected_bytes\n' > "$apultra_bcj2_output"
+    printf 'fixture\truntime_image_bytes\trecovery_tail_bytes\tpayload_bytes\tmedian_decode_ns\trust_main_decode_ns\trust_call_decode_ns\trust_jump_decode_ns\trust_bcj2_decode_ns\tupx_bytes\tupx_ceiling_bytes\tmaximum_loader_for_upx_bytes\tmaximum_loader_for_105_percent_bytes\tbare_loader_bytes\toracle_text_bytes\toracle_rodata_bytes\tlinked_loader_lower_bound_bytes\tprojected_bytes\n' > "$apultra_bcj2_output"
 fi
 
 upx_version="5.2.0"
@@ -354,6 +354,12 @@ for label in hello-c hello-cpp hello-rust hello-go; do
             $(stat -c %s "$apultra_prefix.rc") + apultra_tail_bytes))"
         apultra_median="$($scratch/apultra-bcj2-oracle \
             "$apultra_runtime" "$apultra_prefix" 21)"
+        IFS=$'\t' read -r apultra_rust_main apultra_rust_call \
+            apultra_rust_jump apultra_rust_bcj2 <<< "$(cargo run --quiet \
+                --release --locked \
+                --config 'profile.release.package.packforge-codec5-decoder.opt-level=2' \
+                -p packforge-codec5-decoder --example m2_codec5_profile -- \
+                "$apultra_runtime" "$apultra_prefix" 21)"
         apultra_manifest_size="$(python3 -c \
             'import json,sys; print(json.load(open(sys.argv[1]))["manifest_size"])' \
             "$apultra_inspect")"
@@ -363,9 +369,11 @@ for label in hello-c hello-cpp hello-rust hello-go; do
         apultra_loader_for_upx="$((apultra_upx_bytes - apultra_payload_bytes - apultra_fixed_bytes - 1))"
         apultra_loader_for_ceiling="$((apultra_upx_ceiling - apultra_payload_bytes - apultra_fixed_bytes))"
         apultra_projected_bytes="$((apultra_payload_bytes + apultra_fixed_bytes + apultra_linked_loader_lower_bound))"
-        printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
+        printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
             "$label" "$apultra_runtime_length" "$apultra_tail_length" \
-            "$apultra_payload_bytes" "$apultra_median" "$apultra_upx_bytes" \
+            "$apultra_payload_bytes" "$apultra_median" \
+            "$apultra_rust_main" "$apultra_rust_call" "$apultra_rust_jump" \
+            "$apultra_rust_bcj2" "$apultra_upx_bytes" \
             "$apultra_upx_ceiling" "$apultra_loader_for_upx" \
             "$apultra_loader_for_ceiling" "$apultra_bare_loader_bytes" \
             "$apultra_oracle_text_bytes" "$apultra_oracle_rodata_bytes" \
