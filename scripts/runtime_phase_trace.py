@@ -17,6 +17,15 @@ LINE = re.compile(
     r"(?P<name>[a-z0-9_]+)\((?P<arguments>.*)\)\s+=.*"
     r"<(?P<duration>\d+\.\d+)>\s*$"
 )
+UNFINISHED = re.compile(
+    r"^\s*(?P<pid>\d+)\s+(?P<start>\d+\.\d+)\s+"
+    r"(?P<name>[a-z0-9_]+)\((?P<arguments>.*)\s+<unfinished \.\.\.>\s*$"
+)
+RESUMED = re.compile(
+    r"^\s*(?P<pid>\d+)\s+(?P<start>\d+\.\d+)\s+"
+    r"<\.\.\. (?P<name>[a-z0-9_]+) resumed>(?P<arguments>.*)\)\s+=.*"
+    r"<(?P<duration>\d+\.\d+)>\s*$"
+)
 FIXED_MMAP = re.compile(
     r"^(?P<address>0x[0-9a-f]+),\s*(?P<length>\d+),.*MAP_FIXED_NOREPLACE"
 )
@@ -48,11 +57,37 @@ def nanoseconds(value: str) -> int:
 def read_events(path: Path) -> list[Event]:
     """Read complete timestamped syscall records from one strace file."""
     events = []
+    unfinished: dict[tuple[int, str], tuple[int, str]] = {}
     try:
         lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
     except OSError as error:
         raise TraceError(f"could not read trace {path}: {error}") from error
     for line in lines:
+        interrupted = UNFINISHED.match(line)
+        if interrupted is not None:
+            key = (int(interrupted.group("pid")), interrupted.group("name"))
+            unfinished[key] = (
+                nanoseconds(interrupted.group("start")),
+                interrupted.group("arguments"),
+            )
+            continue
+        resumed = RESUMED.match(line)
+        if resumed is not None:
+            pid = int(resumed.group("pid"))
+            name = resumed.group("name")
+            pending = unfinished.pop((pid, name), None)
+            if pending is not None:
+                start_ns, arguments = pending
+                events.append(
+                    Event(
+                        pid=pid,
+                        start_ns=start_ns,
+                        duration_ns=nanoseconds(resumed.group("duration")),
+                        name=name,
+                        arguments=arguments + resumed.group("arguments"),
+                    )
+                )
+            continue
         match = LINE.match(line)
         if match is None:
             continue

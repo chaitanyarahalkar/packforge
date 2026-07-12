@@ -49,6 +49,15 @@ DIRECT_TRACE = """\
 43 100.000240 write(1, "ok", 2) = 2 <0.000002>
 """
 
+INTERRUPTED_DIRECT_TRACE = DIRECT_TRACE.replace(
+    '43 100.000240 write(1, "ok", 2) = 2 <0.000002>\n',
+    """\
+43 100.000240 write(1, "ok", 2 <unfinished ...>
+44 100.000241 mmap(NULL, 4096, PROT_READ, MAP_ANONYMOUS, -1, 0) = 0xd00000 <0.000001>
+43 100.000242 <... write resumed>) = 2 <0.000002>
+""",
+)
+
 
 class RuntimePhaseTraceTests(unittest.TestCase):
     def test_extracts_loader_boundaries_and_ignores_target_mmap(self):
@@ -77,6 +86,21 @@ class RuntimePhaseTraceTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "trace"
             path.write_text(DIRECT_TRACE, encoding="utf-8")
+            self.assertEqual(
+                runtime_phase_trace.parse_trace(path),
+                {
+                    "payload_read": 6_000,
+                    "payload_hash": 14_000,
+                    "decompress": 35_000,
+                    "map_segments": 43_000,
+                    "transfer": 47_000,
+                },
+            )
+
+    def test_joins_interrupted_target_write(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "trace"
+            path.write_text(INTERRUPTED_DIRECT_TRACE, encoding="utf-8")
             self.assertEqual(
                 runtime_phase_trace.parse_trace(path),
                 {
