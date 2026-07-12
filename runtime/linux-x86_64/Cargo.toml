@@ -27,6 +27,11 @@ required-features = ["lzma"]
 test = false
 bench = false
 
+[[example]]
+name = "hot_path_benchmark"
+path = "examples/hot_path_benchmark.rs"
+required-features = ["lzma"]
+
 [workspace]
 
 [dev-dependencies]
