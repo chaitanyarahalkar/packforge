@@ -5,7 +5,7 @@ use core::arch::{asm, global_asm};
 use core::panic::PanicInfo;
 use core::{ptr, slice};
 
-#[cfg(all(feature = "lzma-asm", not(feature = "lzma-parallel")))]
+#[cfg(feature = "lzma-asm")]
 use packforge_runtime_linux_x86_64::bcj;
 #[cfg(feature = "apultra-bcj2")]
 use packforge_runtime_linux_x86_64::{apultra, bcj2};
@@ -201,11 +201,7 @@ unsafe fn run(
         .ok_or(b"packforge: invalid v2 payload offset\n" as &'static [u8])?;
     pread_exact(self_fd, payload, payload_offset)
         .map_err(|()| b"packforge: cannot read v2 payload\n" as &'static [u8])?;
-    #[cfg(feature = "lzma-parallel")]
-    let parallel_codec4 = header.codec == v2_format::CODEC_LZMA1_BCJ4;
-    #[cfg(not(feature = "lzma-parallel"))]
-    let parallel_codec4 = false;
-    if !parallel_codec4 && hash::hash(payload) != header.payload_digest {
+    if hash::hash(payload) != header.payload_digest {
         return Err(b"packforge: v2 payload integrity failed\n");
     }
 
@@ -230,45 +226,35 @@ unsafe fn run(
             let chunks = v2_format::parse_codec4_chunks(payload, original_length)
                 .map_err(format_error_message)?;
             #[cfg(feature = "lzma-parallel")]
-            lzma_parallel::decompress_authenticated(
-                payload,
-                original,
-                header.properties,
-                chunks,
-                header.payload_digest,
-                header.original_digest,
-            )
-            .map_err(|_| {
-                b"packforge: codec-4 failed\n" as &'static [u8]
-            })?;
+            lzma_parallel::decompress(payload, original, header.properties, chunks).map_err(
+                |_| b"packforge: parallel codec-4 decompression failed\n" as &'static [u8],
+            )?;
             #[cfg(not(feature = "lzma-parallel"))]
-            {
-                for chunk in chunks {
-                    let compressed_end = chunk
-                        .compressed_offset
-                        .checked_add(chunk.compressed_length)
-                        .ok_or(b"packforge: invalid codec-4 range\n" as &'static [u8])?;
-                    let decoded_end = chunk
-                        .decoded_offset
-                        .checked_add(chunk.decoded_length)
-                        .ok_or(b"packforge: invalid codec-4 range\n" as &'static [u8])?;
-                    lzma_asm::decompress(
-                        payload
-                            .get(chunk.compressed_offset..compressed_end)
-                            .ok_or(b"packforge: invalid codec-4 range\n" as &'static [u8])?,
-                        original
-                            .get_mut(chunk.decoded_offset..decoded_end)
-                            .ok_or(b"packforge: invalid codec-4 range\n" as &'static [u8])?,
-                        header.properties,
-                        chunk.trailing_bytes,
-                    )
-                    .map_err(|_| {
-                        b"packforge: codec-4 LZMA1 decompression failed\n" as &'static [u8]
-                    })?;
-                }
-                bcj::decode(original)
-                    .map_err(|_| b"packforge: codec-4 BCJ decode failed\n" as &'static [u8])?;
+            for chunk in chunks {
+                let compressed_end = chunk
+                    .compressed_offset
+                    .checked_add(chunk.compressed_length)
+                    .ok_or(b"packforge: invalid codec-4 range\n" as &'static [u8])?;
+                let decoded_end = chunk
+                    .decoded_offset
+                    .checked_add(chunk.decoded_length)
+                    .ok_or(b"packforge: invalid codec-4 range\n" as &'static [u8])?;
+                lzma_asm::decompress(
+                    payload
+                        .get(chunk.compressed_offset..compressed_end)
+                        .ok_or(b"packforge: invalid codec-4 range\n" as &'static [u8])?,
+                    original
+                        .get_mut(chunk.decoded_offset..decoded_end)
+                        .ok_or(b"packforge: invalid codec-4 range\n" as &'static [u8])?,
+                    header.properties,
+                    chunk.trailing_bytes,
+                )
+                .map_err(|_| {
+                    b"packforge: codec-4 LZMA1 decompression failed\n" as &'static [u8]
+                })?;
             }
+            bcj::decode(original)
+                .map_err(|_| b"packforge: codec-4 BCJ decode failed\n" as &'static [u8])?;
             original_length
         }
         #[cfg(feature = "apultra-bcj2")]
@@ -278,10 +264,7 @@ unsafe fn run(
         }
         _ => return Err(b"packforge: unsupported v2 codec\n"),
     };
-    if validated_length == original_length
-        && !parallel_codec4
-        && hash::hash(original) != header.original_digest
-    {
+    if validated_length == original_length && hash::hash(original) != header.original_digest {
         return Err(b"packforge: v2 original integrity failed\n");
     }
     let validated = original

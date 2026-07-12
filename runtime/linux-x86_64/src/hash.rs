@@ -1,7 +1,7 @@
 // Compact unkeyed BLAKE3 used by the freestanding runtime.
 
 const BLOCK_LEN: usize = 64;
-pub const CHUNK_LEN: usize = 1024;
+const CHUNK_LEN: usize = 1024;
 const CHUNK_START: u32 = 1;
 const CHUNK_END: u32 = 2;
 const PARENT: u32 = 4;
@@ -94,48 +94,6 @@ pub fn hash(input: &[u8]) -> [u8; 32] {
         output = parent_output(cv_stack[stack_len], output.chaining_value());
     }
     output.root_hash()
-}
-
-/// Computes the chaining value for one complete non-final BLAKE3 chunk.
-///
-/// The caller must provide a valid non-final `chunk_index`.
-#[must_use]
-pub fn chunk_chaining_value(input: &[u8], chunk_index: usize) -> [u32; 8] {
-    let start = chunk_index * CHUNK_LEN;
-    chunk_output(&input[start..start + CHUNK_LEN], chunk_index as u64).chaining_value()
-}
-
-/// Completes a BLAKE3 hash from ordered non-final chunk chaining values.
-///
-/// `chunk_cvs` must contain exactly one value for every complete chunk before
-/// the final chunk, using the canonical global chunk counter.
-#[must_use]
-pub fn hash_with_chunk_cvs(input: &[u8], chunk_cvs: &[[u32; 8]]) -> Option<[u8; 32]> {
-    let chunk_count = input.len().div_ceil(CHUNK_LEN).max(1);
-    let last_chunk = chunk_count - 1;
-    if chunk_cvs.len() != last_chunk {
-        return None;
-    }
-    let mut cv_stack = [[0u32; 8]; 54];
-    let mut stack_len = 0usize;
-    for (chunk_index, chunk_cv) in chunk_cvs.iter().copied().enumerate() {
-        let mut cv = chunk_cv;
-        let mut total_chunks = chunk_index + 1;
-        while total_chunks & 1 == 0 {
-            stack_len -= 1;
-            cv = parent_output(cv_stack[stack_len], cv).chaining_value();
-            total_chunks >>= 1;
-        }
-        cv_stack[stack_len] = cv;
-        stack_len += 1;
-    }
-    let last_start = last_chunk * CHUNK_LEN;
-    let mut output = chunk_output(&input[last_start..], last_chunk as u64);
-    while stack_len > 0 {
-        stack_len -= 1;
-        output = parent_output(cv_stack[stack_len], output.chaining_value());
-    }
-    Some(output.root_hash())
 }
 
 fn chunk_output(chunk: &[u8], chunk_counter: u64) -> Output {
@@ -319,7 +277,7 @@ fn g(state: &mut [u32; 16], a: usize, b: usize, c: usize, d: usize, first: u32, 
 
 #[cfg(test)]
 mod tests {
-    use super::{CHUNK_LEN, chunk_chaining_value, hash, hash_with_chunk_cvs};
+    use super::hash;
 
     #[test]
     fn matches_reference_across_block_chunk_and_tree_boundaries() {
@@ -329,20 +287,5 @@ mod tests {
                 .collect();
             assert_eq!(hash(&input), *blake3::hash(&input).as_bytes(), "{length}");
         }
-    }
-
-    #[test]
-    fn chunk_cv_completion_matches_one_shot_hashing() {
-        for length in [0, 1, 1023, 1024, 1025, 2048, 3073, 16_384, 65_537] {
-            let input: std::vec::Vec<u8> = (0..length)
-                .map(|index| (index as u8).wrapping_mul(19).wrapping_add(7))
-                .collect();
-            let last_chunk = input.len().div_ceil(CHUNK_LEN).max(1) - 1;
-            let chunk_cvs: std::vec::Vec<[u32; 8]> = (0..last_chunk)
-                .map(|index| chunk_chaining_value(&input, index))
-                .collect();
-            assert_eq!(hash_with_chunk_cvs(&input, &chunk_cvs), Some(hash(&input)));
-        }
-        assert_eq!(hash_with_chunk_cvs(&[0; 1025], &[]), None);
     }
 }
