@@ -8,6 +8,7 @@ use serde::Serialize;
 use crate::MAX_ORIGINAL_SIZE;
 use crate::container::{HEADER_LEN, MAX_CONTAINER_SIZE, PackOptions, Profile, Verification};
 use crate::executable::EXECUTABLE_TRAILER_LEN;
+use crate::executable_v2_codec4::{self as codec4, CODEC_LZMA1_BCJ4};
 use crate::manifest::{
     MANIFEST_HEADER_LEN, MANIFEST_SEGMENT_LEN, MAX_MANIFEST_SEGMENTS, ManifestElfError,
     ManifestError, ManifestV0, decode_manifest_v0, manifest_from_elf,
@@ -215,6 +216,7 @@ impl From<ManifestError> for ExecutableV2Error {
 
 #[derive(Debug, Clone)]
 struct ImageHeader {
+    codec: u16,
     original_mode: u32,
     properties: [u8; 5],
     trailing_bytes: u8,
@@ -254,6 +256,16 @@ pub fn pack_executable_v2(
     options: PackOptions,
     loader: &[u8],
 ) -> Result<PackedExecutableV2, ExecutableV2Error> {
+    pack_executable_v2_with_codec(original, original_mode, options, loader, CODEC_LZMA1)
+}
+
+fn pack_executable_v2_with_codec(
+    original: &[u8],
+    original_mode: u32,
+    options: PackOptions,
+    loader: &[u8],
+    codec: u16,
+) -> Result<PackedExecutableV2, ExecutableV2Error> {
     if options.profile != Profile::Balanced {
         return Err(ExecutableV2Error::UnsupportedProfile(options.profile));
     }
@@ -265,20 +277,31 @@ pub fn pack_executable_v2(
     let reduce_size = u32::try_from(original.len())
         .map_err(|_| ExecutableV2Error::SizeOverflow("original executable"))?;
     let properties = lzma_sdk_rs::LzmaProps::for_level(9, reduce_size);
-    let payload = lzma_sdk_rs::encode(original, &properties);
     let decoder_properties = lzma_sdk_rs::decoder_props(&properties);
-    validate_properties(decoder_properties, 0)?;
-
-    let mut decoded = vec![0u8; original.len()];
-    let report = lzma::decompress(&payload, &decoder_properties, &mut decoded)
-        .map_err(ExecutableV2Error::Decompression)?;
+    let (payload, trailing_bytes, decoded) = match codec {
+        CODEC_LZMA1 => {
+            let payload = lzma_sdk_rs::encode(original, &properties);
+            let mut decoded = vec![0u8; original.len()];
+            let report = lzma::decompress(&payload, &decoder_properties, &mut decoded)
+                .map_err(ExecutableV2Error::Decompression)?;
+            (payload, report.trailing_bytes, decoded)
+        }
+        CODEC_LZMA1_BCJ4 => {
+            let payload = codec4::encode(original, &properties)?;
+            let decoded = codec4::decode(&payload, decoder_properties, original.len())?;
+            (payload, 0, decoded)
+        }
+        _ => return Err(ExecutableV2Error::UnsupportedMetadata),
+    };
+    validate_properties(codec, decoder_properties, trailing_bytes)?;
     if decoded != original {
         return Err(ExecutableV2Error::Integrity("original"));
     }
     let header = ImageHeader {
+        codec,
         original_mode,
         properties: decoder_properties,
-        trailing_bytes: report.trailing_bytes,
+        trailing_bytes,
         manifest_length: usize_to_u64(manifest_bytes.len(), "manifest")?,
         payload_length: usize_to_u64(payload.len(), "payload")?,
         original_length,
@@ -419,7 +442,7 @@ fn parse(executable: &[u8]) -> Result<ParsedExecutable<'_>, ExecutableV2Error> {
             .get(loader_end..header_end)
             .ok_or(ExecutableV2Error::InvalidRange)?,
     )?;
-    validate_properties(header.properties, header.trailing_bytes)?;
+    validate_properties(header.codec, header.properties, header.trailing_bytes)?;
     let manifest_end = header_end
         .checked_add(to_usize(header.manifest_length, "manifest")?)
         .ok_or(ExecutableV2Error::InvalidRange)?;
@@ -455,15 +478,25 @@ fn parse(executable: &[u8]) -> Result<ParsedExecutable<'_>, ExecutableV2Error> {
 }
 
 fn decompress_original(parsed: &ParsedExecutable<'_>) -> Result<Vec<u8>, ExecutableV2Error> {
-    let mut original = vec![0u8; to_usize(parsed.header.original_length, "original")?];
-    let report = lzma::decompress(parsed.payload, &parsed.header.properties, &mut original)
-        .map_err(ExecutableV2Error::Decompression)?;
-    if report.trailing_bytes != parsed.header.trailing_bytes {
-        return Err(ExecutableV2Error::TrailingBytes {
-            expected: parsed.header.trailing_bytes,
-            actual: report.trailing_bytes,
-        });
-    }
+    let original_length = to_usize(parsed.header.original_length, "original")?;
+    let original = match parsed.header.codec {
+        CODEC_LZMA1 => {
+            let mut original = vec![0u8; original_length];
+            let report = lzma::decompress(parsed.payload, &parsed.header.properties, &mut original)
+                .map_err(ExecutableV2Error::Decompression)?;
+            if report.trailing_bytes != parsed.header.trailing_bytes {
+                return Err(ExecutableV2Error::TrailingBytes {
+                    expected: parsed.header.trailing_bytes,
+                    actual: report.trailing_bytes,
+                });
+            }
+            original
+        }
+        CODEC_LZMA1_BCJ4 => {
+            codec4::decode(parsed.payload, parsed.header.properties, original_length)?
+        }
+        _ => return Err(ExecutableV2Error::UnsupportedMetadata),
+    };
     if digest(&original) != parsed.header.original_digest {
         return Err(ExecutableV2Error::Integrity("original"));
     }
@@ -567,12 +600,18 @@ fn validate_direct_output_layout(manifest: &ManifestV0) -> Result<(), Executable
     Ok(())
 }
 
-fn validate_properties(properties: [u8; 5], trailing: u8) -> Result<(), ExecutableV2Error> {
+fn validate_properties(
+    codec: u16,
+    properties: [u8; 5],
+    trailing: u8,
+) -> Result<(), ExecutableV2Error> {
     let dictionary =
         u32::from_le_bytes([properties[1], properties[2], properties[3], properties[4]]);
     if properties[0] != FIXED_LZMA_PROPERTIES
         || !(MIN_DICTIONARY_SIZE..=MAX_DICTIONARY_SIZE).contains(&dictionary)
-        || trailing > 5
+        || !matches!(codec, CODEC_LZMA1 | CODEC_LZMA1_BCJ4)
+        || (codec == CODEC_LZMA1 && trailing > 5)
+        || (codec == CODEC_LZMA1_BCJ4 && trailing != 0)
     {
         return Err(ExecutableV2Error::UnsupportedMetadata);
     }
@@ -584,7 +623,7 @@ fn encode_header(header: &ImageHeader) -> [u8; EXECUTABLE_V2_HEADER_LEN] {
     bytes[..8].copy_from_slice(HEADER_MAGIC);
     put_u16(&mut bytes, 8, EXECUTABLE_V2_VERSION);
     put_u16(&mut bytes, 10, EXECUTABLE_V2_HEADER_LEN_U16);
-    put_u16(&mut bytes, 12, CODEC_LZMA1);
+    put_u16(&mut bytes, 12, header.codec);
     put_u32(&mut bytes, 16, header.original_mode);
     bytes[20..25].copy_from_slice(&header.properties);
     bytes[25] = header.trailing_bytes;
@@ -614,7 +653,8 @@ fn decode_header(bytes: &[u8]) -> Result<ImageHeader, ExecutableV2Error> {
     if digest(&hash_input) != stored_digest {
         return Err(ExecutableV2Error::Integrity("header"));
     }
-    if get_u16(bytes, 12)? != CODEC_LZMA1
+    let codec = get_u16(bytes, 12)?;
+    if !matches!(codec, CODEC_LZMA1 | CODEC_LZMA1_BCJ4)
         || get_u16(bytes, 14)? != 0
         || bytes[26..32].iter().any(|byte| *byte != 0)
         || bytes[56..64].iter().any(|byte| *byte != 0)
@@ -622,6 +662,7 @@ fn decode_header(bytes: &[u8]) -> Result<ImageHeader, ExecutableV2Error> {
         return Err(ExecutableV2Error::UnsupportedMetadata);
     }
     Ok(ImageHeader {
+        codec,
         original_mode: get_u32(bytes, 16)?,
         properties: bytes[20..25]
             .try_into()
@@ -798,9 +839,10 @@ fn hex(bytes: &[u8; 32]) -> String {
 mod tests {
     use super::{
         EXECUTABLE_V2_HEADER_LEN, ExecutableV2Error, PackOptions, Profile, Verification,
-        inspect_executable_v2, pack_executable_v2, unpack_executable_v2,
-        validate_direct_output_layout, verify_executable_v2,
+        inspect_executable_v2, pack_executable_v2, pack_executable_v2_with_codec,
+        unpack_executable_v2, validate_direct_output_layout, verify_executable_v2,
     };
+    use crate::executable_v2_codec4::CODEC_LZMA1_BCJ4;
     use crate::{LINUX_X86_64_RUNTIME_V2, MAX_ORIGINAL_SIZE};
     use crate::{ManifestSegment, ManifestV0};
 
@@ -858,6 +900,43 @@ mod tests {
         let unpacked = unpack_executable_v2(&first.bytes).unwrap();
         assert_eq!(unpacked.bytes, fixture());
         assert_eq!(unpacked.info.original_mode, 0o755);
+    }
+
+    #[test]
+    fn codec4_host_round_trip_uses_canonical_four_stream_table() {
+        let original = fixture();
+        let packed = pack_executable_v2_with_codec(
+            &original,
+            0o755,
+            PackOptions {
+                profile: Profile::Balanced,
+                allow_larger: true,
+            },
+            LINUX_X86_64_RUNTIME_V2,
+            CODEC_LZMA1_BCJ4,
+        )
+        .unwrap();
+        let repeated = pack_executable_v2_with_codec(
+            &original,
+            0o755,
+            PackOptions {
+                profile: Profile::Balanced,
+                allow_larger: true,
+            },
+            LINUX_X86_64_RUNTIME_V2,
+            CODEC_LZMA1_BCJ4,
+        )
+        .unwrap();
+        assert_eq!(packed.bytes, repeated.bytes);
+        assert_eq!(
+            &packed.bytes[LINUX_X86_64_RUNTIME_V2.len() + 12..LINUX_X86_64_RUNTIME_V2.len() + 14],
+            &CODEC_LZMA1_BCJ4.to_le_bytes()
+        );
+        assert_eq!(
+            verify_executable_v2(&packed.bytes).unwrap().trailing_bytes,
+            0
+        );
+        assert_eq!(unpack_executable_v2(&packed.bytes).unwrap().bytes, original);
     }
 
     #[test]

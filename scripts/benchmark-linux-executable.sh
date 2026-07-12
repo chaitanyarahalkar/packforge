@@ -105,7 +105,7 @@ if [[ -n "$asm_oracle_output" ]]; then
         "$scratch/7zip/C/LzmaDec.c" "$scratch/7zip/C/Alloc.c" \
         "$scratch/LzmaDecOpt.o" -o "$scratch/lzma-asm-oracle"
     asm_object_bytes="$(stat -c %s "$scratch/LzmaDecOpt.o")"
-    asm_text_bytes="$(size -A "$scratch/LzmaDecOpt.o" | awk '$1 == ".text" { print $2 }')"
+    asm_text_bytes="$(size -A "$scratch/LzmaDecOpt.o" | awk '$1 ~ /^\.text/ { total += $2 } END { print total + 0 }')"
 fi
 
 cc -O2 -Wall -Wextra -Werror -static -no-pie \

@@ -7,6 +7,7 @@ mod container;
 mod diagnostic;
 mod executable;
 mod executable_v2;
+mod executable_v2_codec4;
 mod format;
 mod manifest;
 
