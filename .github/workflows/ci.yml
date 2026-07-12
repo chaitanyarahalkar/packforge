@@ -63,13 +63,15 @@ jobs:
         run: bash scripts/build-runtime.sh --check
       - name: Reproducible runtime v2 artifact
         run: |
+          status=0
           PACKFORGE_RUNTIME_V2_OUTPUT=target/runtime-v2-linux/loader-v2 \
-            bash scripts/build-runtime-v2.sh --check
+            bash scripts/build-runtime-v2.sh --check || status=1
           PACKFORGE_RUNTIME_V2_OUTPUT=target/runtime-v2-linux/loader-v2-codec5 \
           PACKFORGE_RUNTIME_V2_DECODER=apultra-bcj2 \
           PACKFORGE_RUNTIME_V2_DECODER_OPT_LEVEL=2 \
           PACKFORGE_RUNTIME_V2_HASH=compact-optz \
-            bash scripts/build-runtime-v2.sh --check
+            bash scripts/build-runtime-v2.sh --check || status=1
+          exit "$status"
       - uses: actions/upload-artifact@v4
         if: always()
         with:
