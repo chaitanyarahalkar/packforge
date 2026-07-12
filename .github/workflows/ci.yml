@@ -65,7 +65,7 @@ jobs:
         run: |
           bash scripts/build-runtime-v2.sh --check
           PACKFORGE_RUNTIME_V2_DECODER=apultra-bcj2 \
-          PACKFORGE_RUNTIME_V2_DECODER_OPT_LEVEL=2 \
+          PACKFORGE_RUNTIME_V2_DECODER_OPT_LEVEL=1 \
           PACKFORGE_RUNTIME_V2_HASH=compact-optz \
             bash scripts/build-runtime-v2.sh --check
       - uses: actions/upload-artifact@v4

@@ -159,6 +159,13 @@ fn copy_match(
     if end > output.len() {
         return Err(Error::Output);
     }
+    if offset >= 16 {
+        while end - *position >= 16 {
+            let source = *position - offset;
+            output.copy_within(source..source + 16, *position);
+            *position += 16;
+        }
+    }
     while *position < end {
         let source = *position - offset;
         output[*position] = output[source];
@@ -171,7 +178,7 @@ fn copy_match(
 mod tests {
     use packforge_codec5_sys::apultra_compress_bytes;
 
-    use super::{Error, decompress};
+    use super::{Error, copy_match, decompress};
 
     #[test]
     fn matches_pinned_apultra_encoder_and_rejects_corruption() {
@@ -191,5 +198,25 @@ mod tests {
             decompress(&truncated, &mut decoded),
             Err(Error::Input | Error::Output | Error::Trailing)
         ));
+    }
+
+    #[test]
+    fn match_copy_handles_short_periods_and_rejects_invalid_ranges() {
+        let mut repeated = [0u8; 33];
+        repeated[0] = 0xa5;
+        let mut position = 1;
+        copy_match(&mut repeated, &mut position, 1, 32).unwrap();
+        assert_eq!(repeated, [0xa5; 33]);
+        assert_eq!(position, repeated.len());
+
+        let mut periodic = *b"abc..............................";
+        let mut position = 3;
+        copy_match(&mut periodic, &mut position, 3, 30).unwrap();
+        assert_eq!(&periodic, b"abcabcabcabcabcabcabcabcabcabcabc");
+
+        let mut output = [0u8; 8];
+        assert_eq!(copy_match(&mut output, &mut 0, 1, 1), Err(Error::Offset));
+        assert_eq!(copy_match(&mut output, &mut 1, 0, 1), Err(Error::Offset));
+        assert_eq!(copy_match(&mut output, &mut 1, 1, 8), Err(Error::Output));
     }
 }
