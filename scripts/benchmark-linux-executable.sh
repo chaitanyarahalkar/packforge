@@ -39,6 +39,7 @@ raw_samples="${PACKFORGE_BENCHMARK_RAW:-}"
 runtime_traces="${PACKFORGE_RUNTIME_TRACES:-}"
 phase_iterations="${PACKFORGE_PHASE_ITERATIONS:-0}"
 codec_spike_output="${PACKFORGE_CODEC_SPIKE_OUTPUT:-}"
+asm_oracle_output="${PACKFORGE_ASM_ORACLE_OUTPUT:-}"
 if ! [[ "$phase_iterations" =~ ^[0-9]+$ ]] || \
     (( phase_iterations < 0 || phase_iterations > 21 )); then
     printf 'PACKFORGE_PHASE_ITERATIONS must be from 0 through 21\n' >&2
@@ -57,6 +58,9 @@ fi
 if [[ -n "$codec_spike_output" ]]; then
     printf 'fixture\tstreams\tpayload_bytes\tprojected_bytes\tupx_ceiling_bytes\tpasses_size\n' \
         > "$codec_spike_output"
+fi
+if [[ -n "$asm_oracle_output" ]]; then
+    printf 'fixture\tmedian_ns\tasm_object_bytes\tasm_text_bytes\n' > "$asm_oracle_output"
 fi
 
 upx_version="5.2.0"
@@ -79,6 +83,29 @@ cargo build --release --locked -p packforge-cli >/dev/null
 if [[ -n "$codec_spike_output" ]]; then
     cargo build --release --locked -p packforge-core --example m2_codec_spike >/dev/null
     codec_spike="$target_dir/release/examples/m2_codec_spike"
+fi
+if [[ -n "$asm_oracle_output" ]]; then
+    seven_zip_commit="f9d78aff31a5f2521ae7ddbdc97c4a8855808959"
+    asmc_commit="4b669147521b277b9e050922e7c97cb8aa608f45"
+    git clone --quiet --no-checkout https://github.com/ip7z/7zip.git "$scratch/7zip"
+    git -C "$scratch/7zip" checkout --quiet "$seven_zip_commit"
+    test "$(git -C "$scratch/7zip" rev-parse HEAD)" = "$seven_zip_commit"
+    git clone --quiet --no-checkout https://github.com/nidud/asmc.git "$scratch/asmc"
+    git -C "$scratch/asmc" checkout --quiet "$asmc_commit"
+    test "$(git -C "$scratch/asmc" rev-parse HEAD)" = "$asmc_commit"
+    chmod +x "$scratch/asmc/bin/asmc64"
+    (
+        cd "$scratch/7zip/Asm/x86"
+        "$scratch/asmc/bin/asmc64" -elf64 -DABI_LINUX \
+            -Fo"$scratch/" LzmaDecOpt.asm
+    ) >/dev/null
+    cc -O3 -DNDEBUG -DZ7_LZMA_DEC_OPT -Wall -Wextra -Werror \
+        -I"$scratch/7zip/C" \
+        "$workspace/scripts/support/lzma_asm_oracle.c" \
+        "$scratch/7zip/C/LzmaDec.c" "$scratch/7zip/C/Alloc.c" \
+        "$scratch/LzmaDecOpt.o" -o "$scratch/lzma-asm-oracle"
+    asm_object_bytes="$(stat -c %s "$scratch/LzmaDecOpt.o")"
+    asm_text_bytes="$(size -A "$scratch/LzmaDecOpt.o" | awk '$1 == ".text" { print $2 }')"
 fi
 
 cc -O2 -Wall -Wextra -Werror -static -no-pie \
@@ -216,11 +243,14 @@ for label in hello-c hello-cpp hello-rust hello-go; do
         baseline_bytes="$(stat -c %s "$packforge")"
         baseline_payload="$($packer inspect "$packforge" --json | python3 -c \
             'import json,sys; print(json.load(sys.stdin)["payload_size"])')"
+        baseline_loader="$($packer inspect "$packforge" --json | python3 -c \
+            'import json,sys; print(json.load(sys.stdin)["loader_size"])')"
         upx_bytes="$(stat -c %s "$upx_packed")"
         upx_ceiling="$((upx_bytes * 105 / 100))"
         "$codec_spike" "$original" | tail -n +2 | \
             while IFS=$'\t' read -r streams _ payload_bytes _; do
-                projected="$((baseline_bytes - baseline_payload + payload_bytes + 768 + streams * 32))"
+                runtime_reserve="$((23500 - baseline_loader))"
+                projected="$((baseline_bytes - baseline_payload + payload_bytes + runtime_reserve + streams * 32))"
                 passes=false
                 if (( projected <= upx_ceiling )); then
                     passes=true
@@ -229,6 +259,24 @@ for label in hello-c hello-cpp hello-rust hello-go; do
                     "$label" "$streams" "$payload_bytes" "$projected" \
                     "$upx_ceiling" "$passes" >> "$codec_spike_output"
             done
+    fi
+
+    if [[ -n "$asm_oracle_output" ]]; then
+        inspect_json="$scratch/$label.oracle-inspect.json"
+        "$packer" inspect "$packforge" --json > "$inspect_json"
+        read -r loader_size manifest_size payload_size original_size < <(
+            python3 -c 'import json,sys; value=json.load(open(sys.argv[1])); print(value["loader_size"], value["manifest_size"], value["payload_size"], value["original_size"])' \
+                "$inspect_json"
+        )
+        dd if="$packforge" of="$scratch/$label.properties" bs=1 \
+            skip="$((loader_size + 20))" count=5 status=none
+        dd if="$packforge" of="$scratch/$label.payload" bs=1 \
+            skip="$((loader_size + 192 + manifest_size))" count="$payload_size" status=none
+        oracle_median="$($scratch/lzma-asm-oracle \
+            "$scratch/$label.payload" "$scratch/$label.properties" "$original" \
+            "$original_size" 21)"
+        printf '%s\t%s\t%s\t%s\n' "$label" "$oracle_median" \
+            "$asm_object_bytes" "$asm_text_bytes" >> "$asm_oracle_output"
     fi
 
     capture_behavior "$original" "$scratch/original-behavior"

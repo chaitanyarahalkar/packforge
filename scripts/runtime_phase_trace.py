@@ -21,6 +21,7 @@ FIXED_MMAP = re.compile(
     r"^(?P<address>0x[0-9a-f]+),\s*(?P<length>\d+),.*MAP_FIXED_NOREPLACE"
 )
 MPROTECT = re.compile(r"^(?P<address>0x[0-9a-f]+),")
+TRAILING_LENGTH = re.compile(r",\s*(?P<length>\d+),\s*\d+\s*$")
 
 
 class TraceError(ValueError):
@@ -105,15 +106,11 @@ def parse_trace(path: Path) -> dict[str, int]:
         and "MAP_ANONYMOUS" in event.arguments
         and "MAP_FIXED_NOREPLACE" not in event.arguments
     ]
-    if len(staging_mappings) < 2:
+    if not staging_mappings:
         raise TraceError(f"trace has an incomplete staging-map sequence: {path}")
-    original_mapping = staging_mappings[-1]
-
-    preads = [
-        event
-        for event in loader
-        if event.name == "pread64" and event.start_ns < original_mapping.start_ns
-    ]
+    direct_output = "PROT_READ|PROT_WRITE" in first_fixed.arguments
+    phase_boundary = first_fixed if direct_output else staging_mappings[-1]
+    preads = [event for event in loader if event.name == "pread64" and event.start_ns < phase_boundary.start_ns]
     if len(preads) < 4:
         raise TraceError(f"trace has an incomplete v2 pread sequence: {path}")
     payload_read = preads[-1]
@@ -130,7 +127,21 @@ def parse_trace(path: Path) -> dict[str, int]:
             target_mprotects.append(event)
     if not target_mprotects:
         raise TraceError(f"trace has no target mprotect sequence: {path}")
-    last_target_mprotect = target_mprotects[-1]
+    if direct_output:
+        manifest_length_match = TRAILING_LENGTH.search(preads[-2].arguments)
+        if manifest_length_match is None:
+            raise TraceError(f"trace has no direct-output manifest length: {path}")
+        manifest_length = int(manifest_length_match.group("length"))
+        segment_count, remainder = divmod(manifest_length - 40, 48)
+        if manifest_length < 40 or remainder != 0 or segment_count == 0:
+            raise TraceError(f"trace has an invalid direct-output manifest length: {path}")
+        if len(target_mprotects) < segment_count:
+            raise TraceError(f"trace has an incomplete target protection sequence: {path}")
+        first_target_mprotect = target_mprotects[0]
+        last_target_mprotect = target_mprotects[segment_count - 1]
+    else:
+        first_target_mprotect = first_fixed
+        last_target_mprotect = target_mprotects[-1]
 
     target_write = next(
         (
@@ -145,20 +156,24 @@ def parse_trace(path: Path) -> dict[str, int]:
     if target_write is None:
         raise TraceError(f"trace has no target stdout write after transfer: {path}")
 
+    if direct_output:
+        payload_hash_end = first_fixed.start_ns
+        decompress_start = first_fixed.end_ns
+        decompress_end = first_target_mprotect.start_ns
+        map_start = first_target_mprotect.start_ns
+    else:
+        original_mapping = staging_mappings[-1]
+        payload_hash_end = original_mapping.start_ns
+        decompress_start = original_mapping.end_ns
+        decompress_end = first_fixed.start_ns
+        map_start = first_fixed.start_ns
+
     return {
         "payload_read": payload_read.duration_ns,
-        "payload_hash": difference(
-            original_mapping.start_ns, payload_read.end_ns, "payload_hash", path
-        ),
-        "decompress": difference(
-            first_fixed.start_ns, original_mapping.end_ns, "decompress", path
-        ),
-        "map_segments": difference(
-            last_target_mprotect.end_ns, first_fixed.start_ns, "map_segments", path
-        ),
-        "transfer": difference(
-            target_write.start_ns, last_target_mprotect.end_ns, "transfer", path
-        ),
+        "payload_hash": difference(payload_hash_end, payload_read.end_ns, "payload_hash", path),
+        "decompress": difference(decompress_end, decompress_start, "decompress", path),
+        "map_segments": difference(last_target_mprotect.end_ns, map_start, "map_segments", path),
+        "transfer": difference(target_write.start_ns, last_target_mprotect.end_ns, "transfer", path),
     }
 
 

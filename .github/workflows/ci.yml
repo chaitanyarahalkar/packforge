@@ -163,6 +163,7 @@ jobs:
           PACKFORGE_BENCHMARK_RAW: benchmark-output/raw-samples.tsv
           PACKFORGE_RUNTIME_TRACES: benchmark-output/runtime-traces
           PACKFORGE_CODEC_SPIKE_OUTPUT: benchmark-output/m2-codec-spike.tsv
+          PACKFORGE_ASM_ORACLE_OUTPUT: benchmark-output/m2-lzma-asm.tsv
           PACKFORGE_PHASE_ITERATIONS: "7"
           PACKFORGE_DROP_CACHES: "1"
         run: |
