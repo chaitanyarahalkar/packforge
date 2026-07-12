@@ -256,7 +256,7 @@ pub fn pack_executable_v2(
     options: PackOptions,
     loader: &[u8],
 ) -> Result<PackedExecutableV2, ExecutableV2Error> {
-    pack_executable_v2_with_codec(original, original_mode, options, loader, CODEC_LZMA1)
+    pack_executable_v2_with_codec(original, original_mode, options, loader, CODEC_LZMA1_BCJ4)
 }
 
 /// Packs codec 4 with an explicitly supplied candidate loader for M2 validation.
