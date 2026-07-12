@@ -25,10 +25,11 @@ round-trips arbitrary bounded segment descriptions.
 
 ## M1 — Reversible container
 
-**Status: implementation in progress.** Host-side pack, inspect, verify, and
-unpack operations plus negative tests are present. Local formatting, Clippy, the
-workspace suite, and the real static-ELF round trip pass. The milestone remains
-open until the reference-corpus and fuzz-campaign gates complete.
+**Status: complete.** Host-side pack, inspect, verify, and unpack operations pass
+the four-language/four-profile corpus under a 512 MiB limit. Strict JSON goldens,
+stable diagnostics, exhaustive malformed-header regressions, Linux/macOS
+byte-identical output, five fuzz targets, and zero-warning dependency audits are
+linked from `plans/M1.md`.
 
 - Parse and classify ELF headers without mutation.
 - Create a non-executable container holding compressed ranges and recovery data.
@@ -40,7 +41,7 @@ containers fail closed.
 
 ## M2 — Linux ELF x86-64 static executables
 
-**Status: runtime spike in progress.** The fixed executable trailer, host-side
+**Status: implementation plan complete; optimization next.** The fixed executable trailer, host-side
 wrapping/inspection/verification/recovery path, freestanding LZ4 runtime, and
 native Linux CI smoke gate are implemented. Static C, C++, Rust/musl, and Go
 fixtures pass byte-identical recovery and execution equivalence; the behavioral
@@ -49,6 +50,11 @@ signals. Native kernel-matrix and performance gates remain before executable
 output becomes the default. The `ruzstd` 0.8.3 experiment decoded the balanced
 payload correctly but added 59,936 bytes over its static I/O baseline, so it was
 rejected for the 32 KiB M2 loader budget rather than integrated.
+
+The performance-first v2 design, 23,500-byte compact-codec go/no-go budget,
+direct in-process ELF mapping sequence, and strict requirement to beat UPX in
+both median size and cold startup are specified in `plans/M2.md` before further
+runtime changes.
 
 - Implement the smallest native runtime stub.
 - Support a documented static, non-PIE `ET_EXEC` subset.

@@ -105,7 +105,7 @@ See the [product plan](docs/PRODUCT.md), [architecture](docs/ARCHITECTURE.md),
 [self-contained executable format](docs/EXECUTABLE_FORMAT.md),
 [CLI diagnostics](docs/DIAGNOSTICS.md),
 [runtime spike](docs/RUNTIME_SPIKE.md), [benchmark method](docs/BENCHMARKING.md),
-and [security policy](SECURITY.md).
+[M2 performance plan](docs/plans/M2.md), and [security policy](SECURITY.md).
 
 ## Development
 
