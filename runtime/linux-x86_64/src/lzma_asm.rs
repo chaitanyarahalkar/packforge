@@ -128,6 +128,25 @@ pub fn decompress(
     if result != 0 {
         return Err(DecodeError(3));
     }
+    if decoder.dictionary_position < output.len()
+        && (1..=MAX_MATCH_REMAINDER).contains(&decoder.remaining_length)
+    {
+        let distance = decoder.repetitions[0] as usize;
+        if distance == 0 || distance > decoder.dictionary_position {
+            return Err(DecodeError(3));
+        }
+        let mut position = decoder.dictionary_position;
+        let mut remaining = decoder.remaining_length;
+        while position < output.len() && remaining != 0 {
+            unsafe {
+                *decoder.dictionary.add(position) = *decoder.dictionary.add(position - distance);
+            }
+            position += 1;
+            remaining -= 1;
+        }
+        decoder.dictionary_position = position;
+        decoder.remaining_length = remaining;
+    }
     if decoder.dictionary_position != output.len() {
         return Err(DecodeError(4));
     }
