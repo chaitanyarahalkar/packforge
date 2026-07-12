@@ -278,12 +278,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "packforge-codec5-sys"
+version = "0.1.0"
+dependencies = [
+ "cc",
+]
+
+[[package]]
 name = "packforge-core"
 version = "0.1.0"
 dependencies = [
  "blake3",
  "lz4_flex",
  "lzma-sdk-rs",
+ "packforge-codec5-sys",
  "packforge-lzma-decoder",
  "serde",
  "serde_json",

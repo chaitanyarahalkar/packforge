@@ -9,6 +9,7 @@ use crate::MAX_ORIGINAL_SIZE;
 use crate::container::{HEADER_LEN, MAX_CONTAINER_SIZE, PackOptions, Profile, Verification};
 use crate::executable::EXECUTABLE_TRAILER_LEN;
 use crate::executable_v2_codec4::{self as codec4, CODEC_LZMA1_BCJ4};
+use crate::executable_v2_codec5::{self as codec5, CODEC_APULTRA_BCJ2};
 use crate::manifest::{
     MANIFEST_HEADER_LEN, MANIFEST_SEGMENT_LEN, MAX_MANIFEST_SEGMENTS, ManifestElfError,
     ManifestError, ManifestV0, decode_manifest_v0, manifest_from_elf,
@@ -273,6 +274,20 @@ pub fn pack_executable_v2_codec4(
     pack_executable_v2_with_codec(original, original_mode, options, loader, CODEC_LZMA1_BCJ4)
 }
 
+/// Packs codec 5 with an explicitly supplied candidate loader for M2 validation.
+///
+/// This entry point is intentionally excluded from released CLI selection until
+/// the codec 5 runtime and balanced selector pass every strict M2 gate.
+#[doc(hidden)]
+pub fn pack_executable_v2_codec5(
+    original: &[u8],
+    original_mode: u32,
+    options: PackOptions,
+    loader: &[u8],
+) -> Result<PackedExecutableV2, ExecutableV2Error> {
+    pack_executable_v2_with_codec(original, original_mode, options, loader, CODEC_APULTRA_BCJ2)
+}
+
 fn pack_executable_v2_with_codec(
     original: &[u8],
     original_mode: u32,
@@ -304,6 +319,22 @@ fn pack_executable_v2_with_codec(
             let payload = codec4::encode(original, &properties)?;
             let decoded = codec4::decode(&payload, decoder_properties, original.len())?;
             (payload, 0, decoded)
+        }
+        CODEC_APULTRA_BCJ2 => {
+            let runtime_length = manifest
+                .segments
+                .iter()
+                .try_fold(0u64, |maximum, segment| {
+                    segment
+                        .file_offset
+                        .checked_add(segment.file_size)
+                        .map(|end| maximum.max(end))
+                })
+                .and_then(|length| usize::try_from(length).ok())
+                .ok_or(ExecutableV2Error::InvalidRange)?;
+            let encoded = codec5::encode(original, runtime_length, &properties)?;
+            let decoded = codec5::decode(&encoded.payload, decoder_properties, original.len())?;
+            (encoded.payload, 0, decoded)
         }
         _ => return Err(ExecutableV2Error::UnsupportedMetadata),
     };
@@ -509,6 +540,9 @@ fn decompress_original(parsed: &ParsedExecutable<'_>) -> Result<Vec<u8>, Executa
         CODEC_LZMA1_BCJ4 => {
             codec4::decode(parsed.payload, parsed.header.properties, original_length)?
         }
+        CODEC_APULTRA_BCJ2 => {
+            codec5::decode(parsed.payload, parsed.header.properties, original_length)?
+        }
         _ => return Err(ExecutableV2Error::UnsupportedMetadata),
     };
     if digest(&original) != parsed.header.original_digest {
@@ -623,9 +657,9 @@ fn validate_properties(
         u32::from_le_bytes([properties[1], properties[2], properties[3], properties[4]]);
     if properties[0] != FIXED_LZMA_PROPERTIES
         || !(MIN_DICTIONARY_SIZE..=MAX_DICTIONARY_SIZE).contains(&dictionary)
-        || !matches!(codec, CODEC_LZMA1 | CODEC_LZMA1_BCJ4)
+        || !matches!(codec, CODEC_LZMA1 | CODEC_LZMA1_BCJ4 | CODEC_APULTRA_BCJ2)
         || (codec == CODEC_LZMA1 && trailing > 5)
-        || (codec == CODEC_LZMA1_BCJ4 && trailing != 0)
+        || (matches!(codec, CODEC_LZMA1_BCJ4 | CODEC_APULTRA_BCJ2) && trailing != 0)
     {
         return Err(ExecutableV2Error::UnsupportedMetadata);
     }
@@ -668,7 +702,7 @@ fn decode_header(bytes: &[u8]) -> Result<ImageHeader, ExecutableV2Error> {
         return Err(ExecutableV2Error::Integrity("header"));
     }
     let codec = get_u16(bytes, 12)?;
-    if !matches!(codec, CODEC_LZMA1 | CODEC_LZMA1_BCJ4)
+    if !matches!(codec, CODEC_LZMA1 | CODEC_LZMA1_BCJ4 | CODEC_APULTRA_BCJ2)
         || get_u16(bytes, 14)? != 0
         || bytes[26..32].iter().any(|byte| *byte != 0)
         || bytes[56..64].iter().any(|byte| *byte != 0)
@@ -784,7 +818,7 @@ fn build_info(
     }
 }
 
-fn digest(bytes: &[u8]) -> [u8; 32] {
+pub(super) fn digest(bytes: &[u8]) -> [u8; 32] {
     *blake3::hash(bytes).as_bytes()
 }
 
@@ -857,6 +891,7 @@ mod tests {
         unpack_executable_v2, validate_direct_output_layout, verify_executable_v2,
     };
     use crate::executable_v2_codec4::CODEC_LZMA1_BCJ4;
+    use crate::executable_v2_codec5::CODEC_APULTRA_BCJ2;
     use crate::{LINUX_X86_64_RUNTIME_V2, MAX_ORIGINAL_SIZE};
     use crate::{ManifestSegment, ManifestV0};
 
@@ -945,6 +980,45 @@ mod tests {
         assert_eq!(
             &packed.bytes[LINUX_X86_64_RUNTIME_V2.len() + 12..LINUX_X86_64_RUNTIME_V2.len() + 14],
             &CODEC_LZMA1_BCJ4.to_le_bytes()
+        );
+        assert_eq!(
+            verify_executable_v2(&packed.bytes).unwrap().trailing_bytes,
+            0
+        );
+        assert_eq!(unpack_executable_v2(&packed.bytes).unwrap().bytes, original);
+    }
+
+    #[test]
+    fn codec5_host_round_trip_uses_runtime_prefix_and_recovery_tail() {
+        let mut original = fixture();
+        original[96..104].copy_from_slice(&8192u64.to_le_bytes());
+        original[104..112].copy_from_slice(&8192u64.to_le_bytes());
+        let packed = pack_executable_v2_with_codec(
+            &original,
+            0o755,
+            PackOptions {
+                profile: Profile::Balanced,
+                allow_larger: true,
+            },
+            LINUX_X86_64_RUNTIME_V2,
+            CODEC_APULTRA_BCJ2,
+        )
+        .unwrap();
+        let repeated = pack_executable_v2_with_codec(
+            &original,
+            0o755,
+            PackOptions {
+                profile: Profile::Balanced,
+                allow_larger: true,
+            },
+            LINUX_X86_64_RUNTIME_V2,
+            CODEC_APULTRA_BCJ2,
+        )
+        .unwrap();
+        assert_eq!(packed.bytes, repeated.bytes);
+        assert_eq!(
+            &packed.bytes[LINUX_X86_64_RUNTIME_V2.len() + 12..LINUX_X86_64_RUNTIME_V2.len() + 14],
+            &CODEC_APULTRA_BCJ2.to_le_bytes()
         );
         assert_eq!(
             verify_executable_v2(&packed.bytes).unwrap().trailing_bytes,
