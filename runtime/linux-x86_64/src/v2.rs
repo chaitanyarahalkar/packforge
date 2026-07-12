@@ -393,6 +393,7 @@ fn format_error_message(error: v2_format::Error) -> &'static [u8] {
     }
 }
 
+#[inline(always)]
 fn map_writable(length: usize) -> Option<*mut u8> {
     if length == 0 {
         return None;
@@ -409,6 +410,7 @@ fn map_writable(length: usize) -> Option<*mut u8> {
     (!is_error(result)).then_some(result as *mut u8)
 }
 
+#[inline(always)]
 fn pread_exact(fd: usize, mut output: &mut [u8], mut offset: u64) -> Result<(), ()> {
     while !output.is_empty() {
         let result = syscall4(
