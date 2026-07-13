@@ -45,6 +45,7 @@ brotli_output="${PACKFORGE_BROTLI_OUTPUT:-}"
 apultra_bcj2_output="${PACKFORGE_APULTRA_BCJ2_OUTPUT:-}"
 codec5_partition_output="${PACKFORGE_CODEC5_PARTITION_OUTPUT:-}"
 pfg_lz_output="${PACKFORGE_PFG_LZ_OUTPUT:-}"
+pfg_hlz_output="${PACKFORGE_PFG_HLZ_OUTPUT:-}"
 force_codec4="${PACKFORGE_BENCHMARK_CODEC4:-0}"
 runtime_candidate="${PACKFORGE_BENCHMARK_RUNTIME_CANDIDATE:-0}"
 if ! [[ "$phase_iterations" =~ ^[0-9]+$ ]] || \
@@ -90,6 +91,10 @@ fi
 if [[ -n "$pfg_lz_output" ]]; then
     printf 'fixture\toriginal_bytes\tpfglz_payload_bytes\tcodec5_payload_bytes\tpfglz_over_codec5_bp\n' \
         > "$pfg_lz_output"
+fi
+if [[ -n "$pfg_hlz_output" ]]; then
+    printf 'fixture\toriginal_bytes\tpfghlz_payload_bytes\tcodec5_payload_bytes\tpfghlz_over_codec5_bp\n' \
+        > "$pfg_hlz_output"
 fi
 
 upx_version="5.2.0"
@@ -137,6 +142,10 @@ fi
 if [[ -n "$pfg_lz_output" ]]; then
     cargo build --release --locked -p packforge-core --example m2_pfg_lz_probe >/dev/null
     pfg_lz_probe="$target_dir/release/examples/m2_pfg_lz_probe"
+fi
+if [[ -n "$pfg_hlz_output" ]]; then
+    cargo build --release --locked -p packforge-core --example m2_pfg_hlz_probe >/dev/null
+    pfg_hlz_probe="$target_dir/release/examples/m2_pfg_hlz_probe"
 fi
 if [[ -n "$asm_oracle_output" ]]; then
     seven_zip_commit="f9d78aff31a5f2521ae7ddbdc97c4a8855808959"
@@ -374,6 +383,9 @@ for label in hello-c hello-cpp hello-rust hello-go; do
 
     if [[ -n "$pfg_lz_output" ]]; then
         "$pfg_lz_probe" "$label" "$original" >> "$pfg_lz_output"
+    fi
+    if [[ -n "$pfg_hlz_output" ]]; then
+        "$pfg_hlz_probe" "$label" "$original" >> "$pfg_hlz_output"
     fi
 
     if [[ -n "$apultra_bcj2_output" ]]; then

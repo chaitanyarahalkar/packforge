@@ -12,6 +12,8 @@ mod executable_v2_codec5;
 mod format;
 mod manifest;
 
+/// Clean-room host-only entropy-coded `PFG-HLZ/1` feasibility codec.
+pub mod pfg_hlz;
 /// Clean-room host-only `PFG-LZ/1` feasibility codec.
 pub mod pfg_lz;
 
