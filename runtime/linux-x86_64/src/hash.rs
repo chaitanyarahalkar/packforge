@@ -1,4 +1,4 @@
-//! Compact unkeyed BLAKE3 used by the freestanding runtime.
+// Compact unkeyed BLAKE3 used by the freestanding runtime.
 
 const BLOCK_LEN: usize = 64;
 const CHUNK_LEN: usize = 1024;
@@ -18,7 +18,7 @@ const IV: [u32; 8] = [
     0x5BE0_CD19,
 ];
 
-const MSG_SCHEDULE: [[usize; 16]; 7] = [
+const MSG_SCHEDULE: [[u8; 16]; 7] = [
     [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15],
     [2, 6, 3, 10, 7, 0, 4, 13, 1, 11, 12, 5, 9, 14, 15, 8],
     [3, 4, 10, 12, 13, 2, 7, 14, 6, 5, 9, 0, 11, 15, 8, 1],
@@ -73,6 +73,28 @@ pub fn hash(input: &[u8]) -> [u8; 32] {
     let mut cv_stack = [[0u32; 8]; 54];
     let mut stack_len = 0usize;
 
+    #[cfg(all(feature = "four-lane", target_arch = "x86_64"))]
+    {
+        let mut chunk_index = 0usize;
+        while chunk_index + 4 <= last_chunk {
+            for cv in chunk_chaining_values4(input, chunk_index) {
+                push_cv(&mut cv_stack, &mut stack_len, chunk_index, cv);
+                chunk_index += 1;
+            }
+        }
+        while chunk_index < last_chunk {
+            let start = chunk_index * CHUNK_LEN;
+            let output = chunk_output(&input[start..start + CHUNK_LEN], chunk_index as u64);
+            push_cv(
+                &mut cv_stack,
+                &mut stack_len,
+                chunk_index,
+                output.chaining_value(),
+            );
+            chunk_index += 1;
+        }
+    }
+    #[cfg(not(all(feature = "four-lane", target_arch = "x86_64")))]
     for chunk_index in 0..last_chunk {
         let start = chunk_index * CHUNK_LEN;
         let output = chunk_output(&input[start..start + CHUNK_LEN], chunk_index as u64);
@@ -94,6 +116,23 @@ pub fn hash(input: &[u8]) -> [u8; 32] {
         output = parent_output(cv_stack[stack_len], output.chaining_value());
     }
     output.root_hash()
+}
+
+#[cfg(all(feature = "four-lane", target_arch = "x86_64"))]
+fn push_cv(
+    cv_stack: &mut [[u32; 8]; 54],
+    stack_len: &mut usize,
+    chunk_index: usize,
+    mut cv: [u32; 8],
+) {
+    let mut total_chunks = chunk_index + 1;
+    while total_chunks & 1 == 0 {
+        *stack_len -= 1;
+        cv = parent_output(cv_stack[*stack_len], cv).chaining_value();
+        total_chunks >>= 1;
+    }
+    cv_stack[*stack_len] = cv;
+    *stack_len += 1;
 }
 
 fn chunk_output(chunk: &[u8], chunk_counter: u64) -> Output {
@@ -136,6 +175,12 @@ fn parent_output(left: [u32; 8], right: [u32; 8]) -> Output {
 #[cfg(feature = "lzma")]
 fn words_from_block(block: &[u8]) -> [u32; 16] {
     let mut words = [0u32; 16];
+    if block.len() == BLOCK_LEN {
+        for (word, bytes) in words.iter_mut().zip(block.chunks_exact(4)) {
+            *word = u32::from_le_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]);
+        }
+        return words;
+    }
     for (word_index, word) in words.iter_mut().enumerate() {
         let byte_index = word_index * 4;
         let mut bytes = [0u8; 4];
@@ -173,8 +218,13 @@ fn compress(
     state[14] = block_len;
     state[15] = flags;
 
+    #[cfg(not(feature = "optimized"))]
     for schedule in MSG_SCHEDULE {
         round(&mut state, &block_words, &schedule);
+    }
+    #[cfg(feature = "optimized")]
+    for schedule in &MSG_SCHEDULE {
+        round(&mut state, &block_words, schedule);
     }
     for index in 0..8 {
         state[index] ^= state[index + 8];
@@ -183,15 +233,43 @@ fn compress(
     state
 }
 
-fn round(state: &mut [u32; 16], message: &[u32; 16], schedule: &[usize; 16]) {
+#[cfg(all(feature = "four-lane", target_arch = "x86_64"))]
+fn chunk_chaining_values4(input: &[u8], first_chunk: usize) -> [[u32; 8]; 4] {
+    let mut chaining_values = [IV; 4];
+    for block_index in 0..CHUNK_LEN / BLOCK_LEN {
+        let mut block_words = [[0u32; 16]; 4];
+        for (lane, words) in block_words.iter_mut().enumerate() {
+            let start = (first_chunk + lane) * CHUNK_LEN + block_index * BLOCK_LEN;
+            *words = words_from_block(&input[start..start + BLOCK_LEN]);
+        }
+        let flags = (if block_index == 0 { CHUNK_START } else { 0 })
+            | if block_index + 1 == CHUNK_LEN / BLOCK_LEN {
+                CHUNK_END
+            } else {
+                0
+            };
+        chaining_values = packforge_runtime_hash_x86::compress4(
+            chaining_values,
+            block_words,
+            first_chunk as u64,
+            BLOCK_LEN as u32,
+            flags,
+            IV,
+            &MSG_SCHEDULE,
+        );
+    }
+    chaining_values
+}
+
+fn round(state: &mut [u32; 16], message: &[u32; 16], schedule: &[u8; 16]) {
     g(
         state,
         0,
         4,
         8,
         12,
-        message[schedule[0]],
-        message[schedule[1]],
+        message[usize::from(schedule[0])],
+        message[usize::from(schedule[1])],
     );
     g(
         state,
@@ -199,8 +277,8 @@ fn round(state: &mut [u32; 16], message: &[u32; 16], schedule: &[usize; 16]) {
         5,
         9,
         13,
-        message[schedule[2]],
-        message[schedule[3]],
+        message[usize::from(schedule[2])],
+        message[usize::from(schedule[3])],
     );
     g(
         state,
@@ -208,8 +286,8 @@ fn round(state: &mut [u32; 16], message: &[u32; 16], schedule: &[usize; 16]) {
         6,
         10,
         14,
-        message[schedule[4]],
-        message[schedule[5]],
+        message[usize::from(schedule[4])],
+        message[usize::from(schedule[5])],
     );
     g(
         state,
@@ -217,8 +295,8 @@ fn round(state: &mut [u32; 16], message: &[u32; 16], schedule: &[usize; 16]) {
         7,
         11,
         15,
-        message[schedule[6]],
-        message[schedule[7]],
+        message[usize::from(schedule[6])],
+        message[usize::from(schedule[7])],
     );
     g(
         state,
@@ -226,8 +304,8 @@ fn round(state: &mut [u32; 16], message: &[u32; 16], schedule: &[usize; 16]) {
         5,
         10,
         15,
-        message[schedule[8]],
-        message[schedule[9]],
+        message[usize::from(schedule[8])],
+        message[usize::from(schedule[9])],
     );
     g(
         state,
@@ -235,8 +313,8 @@ fn round(state: &mut [u32; 16], message: &[u32; 16], schedule: &[usize; 16]) {
         6,
         11,
         12,
-        message[schedule[10]],
-        message[schedule[11]],
+        message[usize::from(schedule[10])],
+        message[usize::from(schedule[11])],
     );
     g(
         state,
@@ -244,8 +322,8 @@ fn round(state: &mut [u32; 16], message: &[u32; 16], schedule: &[usize; 16]) {
         7,
         8,
         13,
-        message[schedule[12]],
-        message[schedule[13]],
+        message[usize::from(schedule[12])],
+        message[usize::from(schedule[13])],
     );
     g(
         state,
@@ -253,8 +331,8 @@ fn round(state: &mut [u32; 16], message: &[u32; 16], schedule: &[usize; 16]) {
         4,
         9,
         14,
-        message[schedule[14]],
-        message[schedule[15]],
+        message[usize::from(schedule[14])],
+        message[usize::from(schedule[15])],
     );
 }
 

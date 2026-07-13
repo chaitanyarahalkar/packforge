@@ -102,11 +102,15 @@ def inspect_payload(inspect_report: dict[str, Any], fixture_id: str) -> tuple[st
         codec = container.get("codec")
         payload_size = container.get("payload_size")
     elif inspect_report.get("executable_version") == 2:
-        codec = "lzma1"
+        codec = {
+            3: "lzma1",
+            4: "lzma1-bcj4",
+            5: "apultra-bcj2",
+        }.get(inspect_report.get("codec", 3))
         payload_size = inspect_report.get("payload_size")
     else:
         raise ContractError(f"fixture {fixture_id} inspect report has no payload metadata")
-    if codec not in {"lz4", "lzma1"} or not isinstance(payload_size, int) or payload_size <= 0:
+    if codec not in {"lz4", "lzma1", "lzma1-bcj4", "apultra-bcj2"} or not isinstance(payload_size, int) or payload_size <= 0:
         raise ContractError(f"fixture {fixture_id} inspect report has invalid codec metadata")
     decoder_memory = inspect_report.get("decoder_memory_bytes")
     if decoder_memory is not None and (
@@ -220,6 +224,7 @@ def build_report(arguments: argparse.Namespace) -> dict[str, Any]:
         fixtures.append(
             {
                 "id": fixture_id,
+                "codec": codec,
                 "packforge": packforge_summary,
                 "upx": upx_summary,
                 "payload_bytes": payload_bytes,
@@ -242,11 +247,10 @@ def build_report(arguments: argparse.Namespace) -> dict[str, Any]:
                 ),
             }
         )
-    if len(codecs) != 1:
-        raise ContractError("all M2 fixtures must use one runtime codec in a report")
+    runtime_codec = next(iter(codecs)) if len(codecs) == 1 else "mixed"
     loader = loader_metadata(
         arguments.loader,
-        codecs.pop(),
+        runtime_codec,
         maximum_decoder_memory,
         arguments.direct_mapping,
     )
@@ -326,6 +330,7 @@ def validate_report(report: dict[str, Any]) -> None:
         raise ContractError("M2 loader digest is invalid")
     expected_fixture = {
         "id",
+        "codec",
         "packforge",
         "upx",
         "payload_bytes",
@@ -343,6 +348,8 @@ def validate_report(report: dict[str, Any]) -> None:
     for fixture in fixtures:
         if not isinstance(fixture, dict) or set(fixture) != expected_fixture:
             raise ContractError("M2 fixture evidence has missing or unknown fields")
+        if fixture["codec"] not in {"lz4", "lzma1", "lzma1-bcj4", "apultra-bcj2"}:
+            raise ContractError(f"M2 fixture {fixture['id']} has invalid codec evidence")
         for artifact_name in ("packforge", "upx"):
             artifact = fixture[artifact_name]
             if not isinstance(artifact, dict) or set(artifact) != expected_artifact:

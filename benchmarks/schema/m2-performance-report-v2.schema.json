@@ -66,7 +66,7 @@
         "bytes": {"type": "integer", "minimum": 1},
         "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
         "elf_type": {"enum": ["et_exec", "et_dyn"]},
-        "runtime_codec": {"enum": ["lz4", "lzma1"]},
+        "runtime_codec": {"enum": ["lz4", "lzma1", "lzma1-bcj4", "apultra-bcj2", "mixed"]},
         "max_decoder_memory_bytes": {"type": "integer", "minimum": 1},
         "direct_mapping": {"type": "boolean"}
       }
@@ -123,6 +123,7 @@
       "additionalProperties": false,
       "required": [
         "id",
+        "codec",
         "packforge",
         "upx",
         "payload_bytes",
@@ -138,6 +139,7 @@
       ],
       "properties": {
         "id": {"type": "string", "pattern": "^[a-z0-9-]+$"},
+        "codec": {"enum": ["lz4", "lzma1", "lzma1-bcj4", "apultra-bcj2"]},
         "packforge": {"$ref": "#/$defs/artifact"},
         "upx": {"$ref": "#/$defs/artifact"},
         "payload_bytes": {"type": "integer", "minimum": 1},

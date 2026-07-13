@@ -1,0 +1,15 @@
+[package]
+name = "packforge-codec5-decoder"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+[dev-dependencies]
+packforge-codec5-sys = { path = "../packforge-codec5-sys" }
+packforge-runtime-hash = { path = "../packforge-runtime-hash", features = ["lzma", "optimized"] }
+
+[lints]
+workspace = true

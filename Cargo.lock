@@ -278,12 +278,28 @@ dependencies = [
 ]
 
 [[package]]
+name = "packforge-codec5-decoder"
+version = "0.1.0"
+dependencies = [
+ "packforge-codec5-sys",
+ "packforge-runtime-hash",
+]
+
+[[package]]
+name = "packforge-codec5-sys"
+version = "0.1.0"
+dependencies = [
+ "cc",
+]
+
+[[package]]
 name = "packforge-core"
 version = "0.1.0"
 dependencies = [
  "blake3",
  "lz4_flex",
  "lzma-sdk-rs",
+ "packforge-codec5-sys",
  "packforge-lzma-decoder",
  "serde",
  "serde_json",
@@ -297,6 +313,18 @@ version = "0.1.0"
 dependencies = [
  "lzma-sdk-rs",
 ]
+
+[[package]]
+name = "packforge-runtime-hash"
+version = "0.1.0"
+dependencies = [
+ "blake3",
+ "packforge-runtime-hash-x86",
+]
+
+[[package]]
+name = "packforge-runtime-hash-x86"
+version = "0.1.0"
 
 [[package]]
 name = "pkg-config"

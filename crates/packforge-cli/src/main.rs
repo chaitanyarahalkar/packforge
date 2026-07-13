@@ -319,6 +319,7 @@ fn print_executable_v2(info: &ExecutableV2Info) {
     println!("  artifact      executable");
     println!("  wrapper       v{}", info.executable_version);
     println!("  runtime ABI   v{}", info.runtime_abi_version);
+    println!("  codec         {}", info.codec);
     println!("  loader        {} bytes", info.loader_size);
     println!("  manifest      {} bytes", info.manifest_size);
     println!("  payload       {} bytes", info.payload_size);

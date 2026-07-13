@@ -16,7 +16,9 @@ fn fixture() -> Vec<u8> {
     bytes[54..56].copy_from_slice(&56u16.to_le_bytes());
     bytes[56..58].copy_from_slice(&1u16.to_le_bytes());
     bytes[64..68].copy_from_slice(&1u32.to_le_bytes());
+    bytes[68..72].copy_from_slice(&5u32.to_le_bytes());
     bytes[72..80].copy_from_slice(&0u64.to_le_bytes());
+    bytes[80..88].copy_from_slice(&0x40_0000u64.to_le_bytes());
     bytes[96..104].copy_from_slice(&16_384u64.to_le_bytes());
     bytes[104..112].copy_from_slice(&16_384u64.to_le_bytes());
     bytes[256..].fill(0x41);

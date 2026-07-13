@@ -175,7 +175,10 @@ impl ExecutableV2Error {
             | Self::UnsupportedProfile(_)
             | Self::UnsupportedVersion(_)
             | Self::InvalidStructureLength(_)
-            | Self::UnsupportedMetadata => Diagnostic::new("PFG1002", DiagnosticClass::Unsupported),
+            | Self::UnsupportedMetadata
+            | Self::UnsupportedDirectOutputLayout => {
+                Diagnostic::new("PFG1002", DiagnosticClass::Unsupported)
+            }
             Self::NotBeneficial { .. } => Diagnostic::new("PFG1003", DiagnosticClass::Conflict),
             Self::SizeOverflow(_) => Diagnostic::new("PFG3001", DiagnosticClass::ResourceLimit),
             Self::Integrity(_)

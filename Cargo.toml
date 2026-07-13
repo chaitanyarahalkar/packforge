@@ -1,8 +1,12 @@
 [workspace]
 members = [
     "crates/packforge-cli",
+    "crates/packforge-codec5-sys",
+    "crates/packforge-codec5-decoder",
     "crates/packforge-core",
     "crates/packforge-lzma-decoder",
+    "crates/packforge-runtime-hash",
+    "crates/packforge-runtime-hash-x86",
 ]
 resolver = "3"
 

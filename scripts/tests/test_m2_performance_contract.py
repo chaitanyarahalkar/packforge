@@ -73,8 +73,9 @@ execveat(4, \"\", [\"packed\"], [], AT_EMPTY_PATH) = 0
         with tempfile.TemporaryDirectory() as directory:
             report = self.build_baseline(Path(directory))
         self.assertEqual(report["schema_version"], 2)
-        self.assertEqual(report["loader"]["bytes"], 10_888)
+        self.assertEqual(report["loader"]["bytes"], 10_112)
         self.assertEqual(report["loader"]["runtime_codec"], "lz4")
+        self.assertTrue(all(fixture["codec"] == "lz4" for fixture in report["fixtures"]))
         self.assertFalse(report["gates"]["size_win_pass"])
         self.assertFalse(report["gates"]["cold_win_pass"])
         self.assertFalse(report["gates"]["direct_mapping_pass"])
@@ -115,11 +116,12 @@ execveat(4, \"\", [\"packed\"], [], AT_EMPTY_PATH) = 0
             {
                 "artifact_kind": "executable",
                 "executable_version": 2,
+                "codec": 5,
                 "payload_size": 123_456,
             },
             "fixture",
         )
-        self.assertEqual(codec, "lzma1")
+        self.assertEqual(codec, "apultra-bcj2")
         self.assertEqual(payload_size, 123_456)
         self.assertIsNone(decoder_memory)
 

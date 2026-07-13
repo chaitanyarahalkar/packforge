@@ -11,10 +11,18 @@ pub const MAX_ORIGINAL_SIZE: u64 = 1 << 30;
 pub const MAX_PAYLOAD_SIZE: u64 = MAX_ORIGINAL_SIZE + (64 << 20);
 pub const MAX_LOADER_SIZE: u64 = 23_500;
 pub const PAGE_SIZE: u64 = 4096;
+pub const CODEC_LZMA1: u16 = 3;
+pub const CODEC_LZMA1_BCJ4: u16 = 4;
+pub const CODEC_APULTRA_BCJ2: u16 = 5;
+pub const CODEC4_CHUNK_COUNT: usize = 4;
+pub const CODEC4_TABLE_LEN: usize = 128;
+pub const CODEC5_STREAM_COUNT: usize = 4;
+pub const CODEC5_TABLE_LEN: usize = 160;
 
 const TRAILER_MAGIC: &[u8; 8] = b"PFGEXE02";
 const HEADER_MAGIC: &[u8; 8] = b"PFGIMG02";
 const MANIFEST_MAGIC: &[u8; 8] = b"PFGMAN00";
+const CODEC5_MAGIC: &[u8; 8] = b"PFGBCJ05";
 const FIXED_LZMA_PROPERTIES: u8 = 0x5d;
 const MIN_DICTIONARY_SIZE: u32 = 1 << 12;
 const MAX_DICTIONARY_SIZE: u32 = 1 << 26;
@@ -49,6 +57,7 @@ pub struct Trailer {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Header {
+    pub codec: u16,
     pub properties: [u8; 5],
     pub trailing_bytes: u8,
     pub manifest_length: u64,
@@ -57,6 +66,30 @@ pub struct Header {
     pub original_digest: [u8; 32],
     pub manifest_digest: [u8; 32],
     pub payload_digest: [u8; 32],
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Codec4Chunk {
+    pub decoded_offset: usize,
+    pub decoded_length: usize,
+    pub compressed_offset: usize,
+    pub compressed_length: usize,
+    pub trailing_bytes: u8,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Codec5Entry {
+    pub decoded_length: usize,
+    pub compressed_offset: usize,
+    pub compressed_length: usize,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Codec5Table {
+    pub runtime_length: usize,
+    pub runtime_digest: [u8; 32],
+    pub entries: [Codec5Entry; CODEC5_STREAM_COUNT],
+    pub recovery_offset: usize,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -98,6 +131,13 @@ pub struct ElfInfo {
     pub program_header_entry_size: u16,
     pub program_header_count: u16,
     pub entry_point: u64,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct OutputLayout {
+    pub start: u64,
+    pub length: u64,
+    pub file_start: u64,
 }
 
 pub fn parse_trailer(bytes: &[u8; TRAILER_LEN], file_length: u64) -> Result<Trailer, Error> {
@@ -158,17 +198,20 @@ pub fn parse_header(bytes: &[u8; HEADER_LEN]) -> Result<Header, Error> {
     let properties = [bytes[20], bytes[21], bytes[22], bytes[23], bytes[24]];
     let dictionary =
         u32::from_le_bytes([properties[1], properties[2], properties[3], properties[4]]);
-    if get_u16(bytes, 12) != 3
+    let codec = get_u16(bytes, 12);
+    if !matches!(codec, CODEC_LZMA1 | CODEC_LZMA1_BCJ4 | CODEC_APULTRA_BCJ2)
         || get_u16(bytes, 14) != 0
         || bytes[26..32].iter().any(|byte| *byte != 0)
         || bytes[56..64].iter().any(|byte| *byte != 0)
         || properties[0] != FIXED_LZMA_PROPERTIES
         || !(MIN_DICTIONARY_SIZE..=MAX_DICTIONARY_SIZE).contains(&dictionary)
-        || bytes[25] > 5
+        || (codec == CODEC_LZMA1 && bytes[25] > 5)
+        || (matches!(codec, CODEC_LZMA1_BCJ4 | CODEC_APULTRA_BCJ2) && bytes[25] != 0)
     {
         return Err(Error::Metadata);
     }
     let header = Header {
+        codec,
         properties,
         trailing_bytes: bytes[25],
         manifest_length: get_u64(bytes, 32),
@@ -189,6 +232,129 @@ pub fn parse_header(bytes: &[u8; HEADER_LEN]) -> Result<Header, Error> {
         return Err(Error::Range);
     }
     Ok(header)
+}
+
+pub fn parse_codec4_chunks(
+    payload: &[u8],
+    original_length: usize,
+) -> Result<[Codec4Chunk; CODEC4_CHUNK_COUNT], Error> {
+    const ENTRY_LEN: usize = CODEC4_TABLE_LEN / CODEC4_CHUNK_COUNT;
+    const TRAILING_SHIFT: u32 = 56;
+    const LENGTH_MASK: u64 = (1u64 << TRAILING_SHIFT) - 1;
+    if payload.len() <= CODEC4_TABLE_LEN {
+        return Err(Error::Range);
+    }
+    let maximum_chunk = original_length
+        .checked_mul(28)
+        .and_then(|value| value.checked_add(99))
+        .map(|value| value / 100)
+        .ok_or(Error::Range)?;
+    let mut expected_decoded = 0usize;
+    let mut expected_compressed = CODEC4_TABLE_LEN;
+    let mut chunks = [Codec4Chunk {
+        decoded_offset: 0,
+        decoded_length: 0,
+        compressed_offset: 0,
+        compressed_length: 0,
+        trailing_bytes: 0,
+    }; CODEC4_CHUNK_COUNT];
+    for (index, chunk) in chunks.iter_mut().enumerate() {
+        let offset = index * ENTRY_LEN;
+        let encoded_length = get_u64(payload, offset + 8);
+        *chunk = Codec4Chunk {
+            decoded_offset: to_usize(get_u64(payload, offset))?,
+            decoded_length: to_usize(encoded_length & LENGTH_MASK)?,
+            compressed_offset: to_usize(get_u64(payload, offset + 16))?,
+            compressed_length: to_usize(get_u64(payload, offset + 24))?,
+            trailing_bytes: (encoded_length >> TRAILING_SHIFT) as u8,
+        };
+        if chunk.decoded_offset != expected_decoded
+            || chunk.compressed_offset != expected_compressed
+            || chunk.decoded_length == 0
+            || chunk.decoded_length > maximum_chunk
+            || chunk.compressed_length == 0
+            || chunk.trailing_bytes > 5
+        {
+            return Err(Error::Range);
+        }
+        expected_decoded = expected_decoded
+            .checked_add(chunk.decoded_length)
+            .ok_or(Error::Range)?;
+        expected_compressed = expected_compressed
+            .checked_add(chunk.compressed_length)
+            .ok_or(Error::Range)?;
+    }
+    if expected_decoded != original_length || expected_compressed != payload.len() {
+        return Err(Error::Range);
+    }
+    Ok(chunks)
+}
+
+pub fn parse_codec5_table(
+    payload: &[u8],
+    original_length: usize,
+) -> Result<Codec5Table, Error> {
+    if payload.len() <= CODEC5_TABLE_LEN
+        || payload.get(..8) != Some(CODEC5_MAGIC)
+        || get_u16(payload, 8) != 1
+        || usize::from(get_u16(payload, 10)) != CODEC5_TABLE_LEN
+        || payload[12..16].iter().any(|byte| *byte != 0)
+        || payload[56] > 5
+        || payload[57..64].iter().any(|byte| *byte != 0)
+    {
+        return Err(Error::Metadata);
+    }
+    let runtime_length = to_usize(get_u64(payload, 16))?;
+    if runtime_length == 0 || runtime_length > original_length {
+        return Err(Error::Range);
+    }
+    let runtime_digest = array_32(payload, 24);
+    let mut expected_offset = CODEC5_TABLE_LEN;
+    let mut entries = [Codec5Entry {
+        decoded_length: 0,
+        compressed_offset: 0,
+        compressed_length: 0,
+    }; CODEC5_STREAM_COUNT];
+    for (index, entry) in entries.iter_mut().enumerate() {
+        let offset = 64 + index * 24;
+        *entry = Codec5Entry {
+            decoded_length: to_usize(get_u64(payload, offset))?,
+            compressed_offset: to_usize(get_u64(payload, offset + 8))?,
+            compressed_length: to_usize(get_u64(payload, offset + 16))?,
+        };
+        let end = entry
+            .compressed_offset
+            .checked_add(entry.compressed_length)
+            .ok_or(Error::Range)?;
+        if (matches!(index, 0 | 3)
+            && (entry.decoded_length == 0 || entry.compressed_length == 0))
+            || entry.compressed_offset != expected_offset
+            || end > payload.len()
+            || (matches!(index, 1 | 2) && entry.decoded_length % 4 != 0)
+            || (index == 3 && entry.decoded_length != entry.compressed_length)
+            || (index < 3 && (entry.decoded_length == 0) != (entry.compressed_length == 0))
+        {
+            return Err(Error::Range);
+        }
+        expected_offset = end;
+    }
+    if entries[0]
+        .decoded_length
+        .checked_add(entries[1].decoded_length)
+        .and_then(|length| length.checked_add(entries[2].decoded_length))
+        != Some(runtime_length)
+        || (runtime_length == original_length
+            && (expected_offset != payload.len() || payload[56] != 0))
+        || (runtime_length < original_length && expected_offset == payload.len())
+    {
+        return Err(Error::Range);
+    }
+    Ok(Codec5Table {
+        runtime_length,
+        runtime_digest,
+        entries,
+        recovery_offset: expected_offset,
+    })
 }
 
 pub fn validate_image_layout(trailer: &Trailer, header: &Header) -> Result<(), Error> {
@@ -309,6 +475,72 @@ pub fn parse_manifest(input: &[u8], expected_original_size: u64) -> Result<Manif
     })
 }
 
+pub fn direct_output_layout(manifest: &Manifest) -> Result<OutputLayout, Error> {
+    let first = manifest.segments.first().ok_or(Error::Manifest)?;
+    let file_start = first
+        .virtual_address
+        .checked_sub(first.file_offset)
+        .ok_or(Error::Range)?;
+    if file_start < PAGE_SIZE || file_start & (PAGE_SIZE - 1) != 0 {
+        return Err(Error::Manifest);
+    }
+    let mut start = file_start;
+    let mut end = file_start
+        .checked_add(manifest.original_size)
+        .ok_or(Error::Range)?;
+    let mut previous_map_end = 0u64;
+    let mut previous_source_end = 0u64;
+    let mut forward_destination_end = 0u64;
+    for segment in manifest.segments.iter().take(manifest.count) {
+        let source_start = file_start
+            .checked_add(segment.file_offset)
+            .ok_or(Error::Range)?;
+        let source_end = source_start
+            .checked_add(segment.file_size)
+            .ok_or(Error::Range)?;
+        let map_end = segment
+            .map_start
+            .checked_add(segment.map_length)
+            .ok_or(Error::Range)?;
+        let destination_end = segment
+            .virtual_address
+            .checked_add(segment.file_size)
+            .ok_or(Error::Range)?;
+        if segment.map_start < previous_map_end
+            || source_start < previous_source_end
+            || forward_destination_end > source_start
+            || (segment.virtual_address < source_start
+                && segment.virtual_address < previous_source_end)
+        {
+            return Err(Error::Overlap);
+        }
+        forward_destination_end = if segment.virtual_address > source_start {
+            destination_end
+        } else {
+            0
+        };
+        previous_map_end = map_end;
+        previous_source_end = source_end;
+        start = start.min(segment.map_start);
+        end = end.max(
+            segment
+                .virtual_address
+                .checked_add(segment.memory_size)
+                .ok_or(Error::Range)?,
+        );
+    }
+    end = align_up(end, PAGE_SIZE)?;
+    let length = end.checked_sub(start).ok_or(Error::Range)?;
+    if length == 0 || length > MAX_ORIGINAL_SIZE {
+        return Err(Error::Range);
+    }
+    Ok(OutputLayout {
+        start,
+        length,
+        file_start,
+    })
+}
+
 pub fn validate_elf(original: &[u8], manifest: &Manifest) -> Result<ElfInfo, Error> {
     let header = original.get(..64).ok_or(Error::Elf)?;
     if header.get(..7) != Some(b"\x7fELF\x02\x01\x01")
@@ -418,6 +650,10 @@ fn get_u64(input: &[u8], offset: usize) -> u64 {
     ])
 }
 
+fn to_usize(value: u64) -> Result<usize, Error> {
+    usize::try_from(value).map_err(|_| Error::Range)
+}
+
 fn array_32(input: &[u8], offset: usize) -> [u8; 32] {
     let mut output = [0u8; 32];
     output.copy_from_slice(&input[offset..offset + 32]);
@@ -429,7 +665,8 @@ mod tests {
     use std::vec;
 
     use super::{
-        Error, HEADER_LEN, MANIFEST_HEADER_LEN, MANIFEST_SEGMENT_LEN, parse_header, parse_manifest,
+        CODEC5_TABLE_LEN, Error, HEADER_LEN, MANIFEST_HEADER_LEN, MANIFEST_SEGMENT_LEN,
+        direct_output_layout, parse_codec5_table, parse_header, parse_manifest,
     };
 
     #[test]
@@ -442,7 +679,7 @@ mod tests {
         manifest[12..14].copy_from_slice(&(MANIFEST_SEGMENT_LEN as u16).to_le_bytes());
         manifest[14..16].copy_from_slice(&1u16.to_le_bytes());
         manifest[24..32].copy_from_slice(&4096u64.to_le_bytes());
-        manifest[32..40].copy_from_slice(&0x401000u64.to_le_bytes());
+        manifest[32..40].copy_from_slice(&0x400100u64.to_le_bytes());
         let offset = MANIFEST_HEADER_LEN;
         manifest[offset + 8..offset + 16].copy_from_slice(&4096u64.to_le_bytes());
         manifest[offset + 16..offset + 24].copy_from_slice(&0x401000u64.to_le_bytes());
@@ -450,5 +687,59 @@ mod tests {
         manifest[offset + 32..offset + 40].copy_from_slice(&4096u64.to_le_bytes());
         manifest[offset + 40..offset + 44].copy_from_slice(&7u32.to_le_bytes());
         assert_eq!(parse_manifest(&manifest, 4096), Err(Error::Permissions));
+    }
+
+    #[test]
+    fn requires_one_bounded_direct_output_bias() {
+        let mut manifest = vec![0u8; MANIFEST_HEADER_LEN + 2 * MANIFEST_SEGMENT_LEN];
+        manifest[..8].copy_from_slice(b"PFGMAN00");
+        manifest[10..12].copy_from_slice(&(MANIFEST_HEADER_LEN as u16).to_le_bytes());
+        manifest[12..14].copy_from_slice(&(MANIFEST_SEGMENT_LEN as u16).to_le_bytes());
+        manifest[14..16].copy_from_slice(&2u16.to_le_bytes());
+        manifest[24..32].copy_from_slice(&0x3000u64.to_le_bytes());
+        manifest[32..40].copy_from_slice(&0x400100u64.to_le_bytes());
+        for (index, (file, address, flags)) in [(0u64, 0x400000u64, 5u32), (0x2000, 0x402000, 4)]
+            .into_iter()
+            .enumerate()
+        {
+            let offset = MANIFEST_HEADER_LEN + index * MANIFEST_SEGMENT_LEN;
+            manifest[offset..offset + 8].copy_from_slice(&file.to_le_bytes());
+            manifest[offset + 8..offset + 16].copy_from_slice(&0x1000u64.to_le_bytes());
+            manifest[offset + 16..offset + 24].copy_from_slice(&address.to_le_bytes());
+            manifest[offset + 24..offset + 32].copy_from_slice(&0x1000u64.to_le_bytes());
+            manifest[offset + 32..offset + 40].copy_from_slice(&0x1000u64.to_le_bytes());
+            manifest[offset + 40..offset + 44].copy_from_slice(&flags.to_le_bytes());
+        }
+        let parsed = parse_manifest(&manifest, 0x3000).unwrap();
+        assert_eq!(direct_output_layout(&parsed).unwrap().file_start, 0x400000);
+
+        manifest[MANIFEST_HEADER_LEN + MANIFEST_SEGMENT_LEN + 16
+            ..MANIFEST_HEADER_LEN + MANIFEST_SEGMENT_LEN + 24]
+            .copy_from_slice(&0x403000u64.to_le_bytes());
+        let parsed = parse_manifest(&manifest, 0x3000).unwrap();
+        assert_eq!(direct_output_layout(&parsed).unwrap().file_start, 0x400000);
+    }
+
+    #[test]
+    fn parses_canonical_codec5_table_and_rejects_noncontiguous_streams() {
+        let mut payload = vec![0u8; CODEC5_TABLE_LEN + 9];
+        payload[..8].copy_from_slice(b"PFGBCJ05");
+        payload[8..10].copy_from_slice(&1u16.to_le_bytes());
+        payload[10..12].copy_from_slice(&(CODEC5_TABLE_LEN as u16).to_le_bytes());
+        payload[16..24].copy_from_slice(&8u64.to_le_bytes());
+        for (index, (decoded, offset, compressed)) in
+            [(4u64, 160u64, 2u64), (4, 162, 2), (0, 164, 0), (5, 164, 5)]
+                .into_iter()
+                .enumerate()
+        {
+            let entry = 64 + index * 24;
+            payload[entry..entry + 8].copy_from_slice(&decoded.to_le_bytes());
+            payload[entry + 8..entry + 16].copy_from_slice(&offset.to_le_bytes());
+            payload[entry + 16..entry + 24].copy_from_slice(&compressed.to_le_bytes());
+        }
+        assert_eq!(parse_codec5_table(&payload, 8).unwrap().runtime_length, 8);
+
+        payload[72..80].copy_from_slice(&161u64.to_le_bytes());
+        assert_eq!(parse_codec5_table(&payload, 8), Err(Error::Range));
     }
 }

@@ -36,25 +36,49 @@ jobs:
         run: cargo check --manifest-path fuzz/Cargo.toml --locked
       - name: Runtime decoder and digest tests
         working-directory: runtime/linux-x86_64
-        run: cargo test --target x86_64-unknown-linux-gnu --locked
+        run: cargo test --target x86_64-unknown-linux-gnu --features apultra-bcj2 --locked
+      - name: Codec 5 decoder differential tests
+        run: cargo test -p packforge-codec5-decoder --locked
+      - name: Four-lane hash differential tests
+        run: cargo test -p packforge-runtime-hash --all-features --locked
+      - name: Codec 4 serial assembly smoke
+        run: |
+          bash scripts/check-lzma-asm-object.sh
+          bash scripts/ci-codec4-asm-smoke.sh
+          PACKFORGE_CODEC4_DECODER=parallel bash scripts/ci-codec4-asm-smoke.sh
+      - name: Codec 5 APultra BCJ2 smoke
+        run: bash scripts/ci-codec5-smoke.sh
       - name: Runtime Clippy
         working-directory: runtime/linux-x86_64
         run: |
           cargo clippy --bin packforge-runtime-linux-x86-64 \
             --target x86_64-unknown-linux-musl --locked -- -D warnings
           cargo clippy --bin packforge-runtime-v2-linux-x86-64 \
-            --target x86_64-unknown-linux-musl --features lzma --locked -- -D warnings
+            --target x86_64-unknown-linux-musl \
+            --features runtime-v2,lzma-parallel,optimized-hash --locked -- -D warnings
+          cargo clippy --bin packforge-runtime-v2-linux-x86-64 \
+            --target x86_64-unknown-linux-musl \
+            --features runtime-v2,apultra-bcj2,optimized-hash --locked -- -D warnings
       - name: Reproducible runtime artifact
         run: bash scripts/build-runtime.sh --check
       - name: Reproducible runtime v2 artifact
-        env:
-          PACKFORGE_RUNTIME_V2_OUTPUT: target/runtime-v2-linux/loader-v2
-        run: bash scripts/build-runtime-v2.sh --check
+        run: |
+          status=0
+          PACKFORGE_RUNTIME_V2_OUTPUT=target/runtime-v2-linux/loader-v2 \
+            bash scripts/build-runtime-v2.sh --check || status=1
+          PACKFORGE_RUNTIME_V2_OUTPUT=target/runtime-v2-linux/loader-v2-codec5 \
+          PACKFORGE_RUNTIME_V2_DECODER=apultra-bcj2 \
+          PACKFORGE_RUNTIME_V2_DECODER_OPT_LEVEL=2 \
+          PACKFORGE_RUNTIME_V2_HASH=compact-optz \
+            bash scripts/build-runtime-v2.sh --check || status=1
+          exit "$status"
       - uses: actions/upload-artifact@v4
         if: always()
         with:
           name: packforge-runtime-v2-linux
-          path: target/runtime-v2-linux/loader-v2
+          path: |
+            target/runtime-v2-linux/loader-v2
+            target/runtime-v2-linux/loader-v2-codec5
       - name: LZMA size feasibility gate
         run: bash scripts/ci-lzma-spike.sh
       - name: Static ELF round trip
@@ -157,11 +181,21 @@ jobs:
           go-version: 1.26.4
           cache: false
       - name: Install benchmark tools
-        run: sudo apt-get update && sudo apt-get install -y g++ curl xz-utils time strace
+        run: sudo apt-get update && sudo apt-get install -y cmake g++ curl xz-utils time strace
       - name: Native executable benchmark
         env:
           PACKFORGE_BENCHMARK_RAW: benchmark-output/raw-samples.tsv
           PACKFORGE_RUNTIME_TRACES: benchmark-output/runtime-traces
+          PACKFORGE_CODEC_SPIKE_OUTPUT: benchmark-output/m2-codec-spike.tsv
+          PACKFORGE_ASM_ORACLE_OUTPUT: benchmark-output/m2-lzma-asm.tsv
+          PACKFORGE_ASM_OBJECT_OUTPUT: benchmark-output/LzmaDecOpt.o
+          PACKFORGE_BROTLI_OUTPUT: benchmark-output/m2-brotli.tsv
+          PACKFORGE_APULTRA_BCJ2_OUTPUT: benchmark-output/m2-apultra-bcj2.tsv
+          PACKFORGE_CODEC5_PARTITION_OUTPUT: benchmark-output/m2-codec5-partition.tsv
+          PACKFORGE_PFG_LZ_OUTPUT: benchmark-output/m2-pfg-lz.tsv
+          PACKFORGE_PFG_HLZ_OUTPUT: benchmark-output/m2-pfg-hlz.tsv
+          PACKFORGE_BENCHMARK_RUNTIME_CANDIDATE: "1"
+          PACKFORGE_PHASE_ITERATIONS: "7"
           PACKFORGE_DROP_CACHES: "1"
         run: |
           mkdir -p benchmark-output

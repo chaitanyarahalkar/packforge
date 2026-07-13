@@ -11,6 +11,7 @@ blake3 = "1.8.5"
 lz4_flex = { version = "0.13.1", default-features = false, features = ["safe-decode", "safe-encode", "std"] }
 lzma-sdk-rs = { version = "0.2301.1", features = ["decode"] }
 packforge-lzma-decoder = { path = "../packforge-lzma-decoder" }
+packforge-codec5-sys = { path = "../packforge-codec5-sys" }
 serde = { version = "1.0.228", features = ["derive"] }
 tempfile = "3.27.0"
 zstd = "0.13.3"

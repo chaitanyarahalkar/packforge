@@ -21,4 +21,6 @@ fuzz_target!(|input: &[u8]| {
             let _ = v2_format::validate_elf(input, &manifest);
         }
     }
+
+    let _ = v2_format::parse_codec5_table(input, input.len());
 });

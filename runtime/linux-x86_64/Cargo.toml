@@ -6,9 +6,22 @@ publish = false
 
 [dependencies]
 packforge-lzma-decoder = { path = "../../crates/packforge-lzma-decoder", optional = true }
+packforge-codec5-decoder = { path = "../../crates/packforge-codec5-decoder", optional = true }
+packforge-runtime-hash = { path = "../../crates/packforge-runtime-hash", features = ["lzma", "optimized"], optional = true }
 
 [features]
 lzma = ["dep:packforge-lzma-decoder"]
+lzma-asm = []
+lzma-parallel = ["lzma-asm"]
+apultra-bcj2 = ["dep:packforge-codec5-decoder"]
+optimized-hash = ["dep:packforge-runtime-hash"]
+# The compact hash source is shared with `packforge-runtime-hash`, where this
+# feature selects the x86 backend. Declaring the name here keeps Cargo's cfg
+# checker aware of the shared source when the scalar runtime module is built.
+four-lane = []
+four-lane-hash = ["optimized-hash", "packforge-runtime-hash/four-lane"]
+optimized = []
+runtime-v2 = []
 lzma-size-spike = ["lzma"]
 
 [[bin]]
@@ -20,9 +33,14 @@ bench = false
 [[bin]]
 name = "packforge-runtime-v2-linux-x86-64"
 path = "src/v2.rs"
-required-features = ["lzma"]
+required-features = ["runtime-v2"]
 test = false
 bench = false
+
+[[example]]
+name = "hot_path_benchmark"
+path = "examples/hot_path_benchmark.rs"
+required-features = ["lzma"]
 
 [workspace]
 
@@ -30,6 +48,7 @@ bench = false
 blake3 = { version = "1.8.5", features = ["pure"] }
 lz4_flex = { version = "0.13.1", default-features = false, features = ["safe-encode", "std"] }
 lzma-sdk-rs = "0.2301.1"
+packforge-codec5-sys = { path = "../../crates/packforge-codec5-sys" }
 
 [profile.dev]
 panic = "abort"
