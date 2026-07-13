@@ -44,6 +44,7 @@ asm_object_output="${PACKFORGE_ASM_OBJECT_OUTPUT:-}"
 brotli_output="${PACKFORGE_BROTLI_OUTPUT:-}"
 apultra_bcj2_output="${PACKFORGE_APULTRA_BCJ2_OUTPUT:-}"
 codec5_partition_output="${PACKFORGE_CODEC5_PARTITION_OUTPUT:-}"
+pfg_lz_output="${PACKFORGE_PFG_LZ_OUTPUT:-}"
 force_codec4="${PACKFORGE_BENCHMARK_CODEC4:-0}"
 runtime_candidate="${PACKFORGE_BENCHMARK_RUNTIME_CANDIDATE:-0}"
 if ! [[ "$phase_iterations" =~ ^[0-9]+$ ]] || \
@@ -85,6 +86,10 @@ fi
 if [[ -n "$codec5_partition_output" ]]; then
     printf 'fixture\tstreams\tmain_decoded_bytes\twhole_main_compressed_bytes\tsplit_main_compressed_bytes\tmain_delta_bytes\tfixed_table_delta_bytes\tmaximum_loader_for_upx_bytes\tremaining_loader_bytes\tformat_budget_pass\n' \
         > "$codec5_partition_output"
+fi
+if [[ -n "$pfg_lz_output" ]]; then
+    printf 'fixture\toriginal_bytes\tpfglz_payload_bytes\tcodec5_payload_bytes\tpfglz_over_codec5_bp\n' \
+        > "$pfg_lz_output"
 fi
 
 upx_version="5.2.0"
@@ -128,6 +133,10 @@ if [[ -n "$codec5_partition_output" ]]; then
     cargo build --release --locked -p packforge-core \
         --example m2_codec5_partition_spike >/dev/null
     codec5_partition_spike="$target_dir/release/examples/m2_codec5_partition_spike"
+fi
+if [[ -n "$pfg_lz_output" ]]; then
+    cargo build --release --locked -p packforge-core --example m2_pfg_lz_probe >/dev/null
+    pfg_lz_probe="$target_dir/release/examples/m2_pfg_lz_probe"
 fi
 if [[ -n "$asm_oracle_output" ]]; then
     seven_zip_commit="f9d78aff31a5f2521ae7ddbdc97c4a8855808959"
@@ -362,6 +371,10 @@ for label in hello-c hello-cpp hello-rust hello-go; do
     "$upx" --best --quiet "$upx_packed" >/dev/null
     "$upx" --best --quiet "$upx_second" >/dev/null
     cmp "$upx_packed" "$upx_second"
+
+    if [[ -n "$pfg_lz_output" ]]; then
+        "$pfg_lz_probe" "$label" "$original" >> "$pfg_lz_output"
+    fi
 
     if [[ -n "$apultra_bcj2_output" ]]; then
         apultra_inspect="$scratch/$label.apultra-inspect.json"

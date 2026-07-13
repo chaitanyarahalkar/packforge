@@ -12,6 +12,9 @@ mod executable_v2_codec5;
 mod format;
 mod manifest;
 
+/// Clean-room host-only `PFG-LZ/1` feasibility codec.
+pub mod pfg_lz;
+
 use std::fmt;
 use std::fs;
 use std::io::Write;
