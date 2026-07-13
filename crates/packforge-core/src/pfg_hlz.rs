@@ -607,6 +607,17 @@ mod tests {
             let encoded = encode(&input).unwrap();
             assert_eq!(decode(&encoded, length).unwrap(), input, "length {length}");
         }
+        for seed in 0..16_u32 {
+            let length = 257 + usize::try_from(seed).unwrap() * 509;
+            let mut state = seed.wrapping_mul(0x9e37_79b9).wrapping_add(0x7f4a_7c15);
+            let mut input = Vec::with_capacity(length);
+            for _ in 0..length {
+                state = state.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
+                input.push(u8::try_from(state >> 24).unwrap());
+            }
+            let encoded = encode(&input).unwrap();
+            assert_eq!(decode(&encoded, length).unwrap(), input, "seed {seed}");
+        }
     }
 
     #[test]
